@@ -488,7 +488,7 @@ function handleGatePass(gate) {
         const hx = lastGate.x + GATE_SPACING / 2; // midway between gates
         const groundY = H - GROUND_HEIGHT;
         const hy = 100 + Math.random() * (groundY - 200);
-        state.hearts.push({ x: hx, y: hy, collected: false });
+        state.hearts.push({ x: hx, y: hy, collected: false, seed: Math.random() * 100 });
       }
     }
   }
@@ -852,15 +852,22 @@ function render() {
     // Draw collectible hearts
     for (const h of state.hearts) {
       if (!h.collected) {
-        const bobY = Math.sin(state.frameCount * 0.08 + h.x) * 6;
+        // Smooth gentle bob using fixed seed per heart, not position
+        const bobY = Math.sin(state.frameCount * 0.04 + h.seed) * 5;
+        const pulseScale = 1 + Math.sin(state.frameCount * 0.06 + h.seed) * 0.08;
+        ctx.save();
+        ctx.translate(h.x, h.y + bobY);
+        ctx.scale(pulseScale, pulseScale);
         ctx.font = `${HEART_SIZE}px Arial`;
         ctx.textAlign = 'center';
-        ctx.fillText('❤️', h.x, h.y + bobY);
-        // Glow
-        ctx.fillStyle = 'rgba(255,80,80,0.15)';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('❤️', 0, 0);
+        // Soft glow
+        ctx.fillStyle = 'rgba(255,80,80,0.12)';
         ctx.beginPath();
-        ctx.arc(h.x, h.y + bobY, HEART_SIZE, 0, Math.PI * 2);
+        ctx.arc(0, 0, HEART_SIZE * 0.8, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
       }
     }
 
