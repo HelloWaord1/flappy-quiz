@@ -8,9 +8,56 @@ const PIPE_GREEN = '#73BF2E';
 const PIPE_GREEN_DARK = '#558B2F';
 const PIPE_GREEN_LIGHT = '#8BC34A';
 const PIPE_BORDER = '#2E7D32';
+
+const PIPE_GOLD = '#FFD700';
+const PIPE_GOLD_DARK = '#DAA520';
+const PIPE_GOLD_LIGHT = '#FFE44D';
+const PIPE_GOLD_BORDER = '#B8860B';
 const BIRD_YELLOW = '#F7DC6F';
 const BIRD_ORANGE = '#F39C12';
+const BIRD_BLUE = '#4FC3F7';
+const BIRD_BLUE_LIGHT = '#B3E5FC';
+const BIRD_BLUE_DARK = '#0288D1';
 const BIRD_SIZE = 28;
+
+// ============================================================
+// TRAIL SYSTEM — stores last N positions
+// ============================================================
+const TRAIL_MAX = 10;
+const trailPositions = [];
+
+export function updateTrail(x, y) {
+  trailPositions.unshift({ x, y });
+  if (trailPositions.length > TRAIL_MAX) {
+    trailPositions.length = TRAIL_MAX;
+  }
+}
+
+export function clearTrail() {
+  trailPositions.length = 0;
+}
+
+export function drawBirdTrail(ctx, comboActive) {
+  for (let i = 1; i < trailPositions.length; i++) {
+    const pos = trailPositions[i];
+    const t = i / trailPositions.length;
+    const alpha = 0.4 * (1 - t);
+    const radius = BIRD_SIZE * 0.35 * (1 - t * 0.7);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (comboActive) {
+      const r = Math.floor(255 - t * 50);
+      const g = Math.floor(140 - t * 100);
+      ctx.fillStyle = `rgb(${r},${g},0)`;
+    } else {
+      ctx.fillStyle = '#F7DC6F';
+    }
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
 
 // Wing animation frames: 0=up, 1=mid, 2=down
 const WING_FRAMES = [
@@ -43,8 +90,10 @@ export function drawRoundRect(ctx, x, y, w, h, r, fill, stroke) {
 // ============================================================
 // BIRD (3-frame wing animation, gradient body)
 // ============================================================
-export function drawBird(ctx, bird, hurtTimer, groundY) {
+export function drawBird(ctx, bird, hurtTimer, groundY, phase) {
   const { x, y, rotation, wingIndex } = bird;
+  const isPhase3 = phase === 3;
+  const isPhase2 = phase === 2;
 
   if (hurtTimer > 0 && Math.floor(hurtTimer / 3) % 2 === 0) {
     return;
@@ -79,11 +128,15 @@ export function drawBird(ctx, bird, hurtTimer, groundY) {
   ctx.ellipse(3, 3, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Body gradient
+  // Body gradient — phase 3 uses blue
   const bodyGrad = ctx.createRadialGradient(-3, -3, 2, 0, 0, BIRD_SIZE / 2);
   if (hurtTimer > 0) {
     bodyGrad.addColorStop(0, '#FF9999');
     bodyGrad.addColorStop(1, '#FF4444');
+  } else if (isPhase3) {
+    bodyGrad.addColorStop(0, BIRD_BLUE_LIGHT);
+    bodyGrad.addColorStop(0.7, BIRD_BLUE);
+    bodyGrad.addColorStop(1, BIRD_BLUE_DARK);
   } else {
     bodyGrad.addColorStop(0, '#FFF176');
     bodyGrad.addColorStop(0.7, BIRD_YELLOW);
@@ -93,7 +146,7 @@ export function drawBird(ctx, bird, hurtTimer, groundY) {
   ctx.beginPath();
   ctx.ellipse(0, 0, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = BIRD_ORANGE;
+  ctx.strokeStyle = isPhase3 ? BIRD_BLUE_DARK : BIRD_ORANGE;
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
@@ -108,13 +161,18 @@ export function drawBird(ctx, bird, hurtTimer, groundY) {
   ctx.translate(-4, 2);
   ctx.rotate(wing.angle);
   const wingGrad = ctx.createLinearGradient(0, wing.yOff - 6, 0, wing.yOff + 6);
-  wingGrad.addColorStop(0, '#F0A830');
-  wingGrad.addColorStop(1, BIRD_ORANGE);
+  if (isPhase3) {
+    wingGrad.addColorStop(0, '#29B6F6');
+    wingGrad.addColorStop(1, BIRD_BLUE_DARK);
+  } else {
+    wingGrad.addColorStop(0, '#F0A830');
+    wingGrad.addColorStop(1, BIRD_ORANGE);
+  }
   ctx.fillStyle = wingGrad;
   ctx.beginPath();
   ctx.ellipse(0, wing.yOff, 11, 7, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = '#D68910';
+  ctx.strokeStyle = isPhase3 ? '#0277BD' : '#D68910';
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.restore();
@@ -138,6 +196,11 @@ export function drawBird(ctx, bird, hurtTimer, groundY) {
   ctx.arc(11.5, -6.5, 1.5, 0, Math.PI * 2);
   ctx.fill();
 
+  // Phase 2: Glasses over eyes
+  if (isPhase2) {
+    drawGlasses(ctx);
+  }
+
   // Beak (two-tone)
   ctx.fillStyle = '#E74C3C';
   ctx.beginPath();
@@ -154,20 +217,84 @@ export function drawBird(ctx, bird, hurtTimer, groundY) {
   ctx.closePath();
   ctx.fill();
 
+  // Phase 3: Tie under beak
+  if (isPhase3) {
+    drawTie(ctx);
+  }
+
   ctx.restore();
+}
+
+// ============================================================
+// BIRD ACCESSORIES
+// ============================================================
+function drawGlasses(ctx) {
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2;
+  // Main lens (over the visible eye)
+  ctx.beginPath();
+  ctx.arc(8, -5, 9, 0, Math.PI * 2);
+  ctx.stroke();
+  // Second lens (left side)
+  ctx.beginPath();
+  ctx.arc(-4, -4, 5.5, 0, Math.PI * 2);
+  ctx.stroke();
+  // Bridge connecting lenses
+  ctx.beginPath();
+  ctx.moveTo(1, -5);
+  ctx.lineTo(-4 + 5.5, -4);
+  ctx.stroke();
+  // Lens tint
+  ctx.save();
+  ctx.globalAlpha = 0.15;
+  ctx.fillStyle = '#4444FF';
+  ctx.beginPath();
+  ctx.arc(8, -5, 8.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(-4, -4, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawTie(ctx) {
+  // Knot
+  ctx.fillStyle = '#D32F2F';
+  ctx.beginPath();
+  ctx.moveTo(12, 8);
+  ctx.lineTo(16, 8);
+  ctx.lineTo(14, 12);
+  ctx.closePath();
+  ctx.fill();
+  // Tie body
+  ctx.fillStyle = '#B71C1C';
+  ctx.beginPath();
+  ctx.moveTo(13, 12);
+  ctx.lineTo(15, 12);
+  ctx.lineTo(16, 20);
+  ctx.lineTo(14, 18);
+  ctx.lineTo(12, 20);
+  ctx.closePath();
+  ctx.fill();
 }
 
 // ============================================================
 // PIPE SECTIONS
 // ============================================================
-function drawPipeSection(ctx, x, y, w, h) {
+function drawPipeSection(ctx, x, y, w, h, golden = false) {
   if (h <= 0) return;
+  const dark = golden ? PIPE_GOLD_DARK : PIPE_GREEN_DARK;
+  const light = golden ? PIPE_GOLD_LIGHT : PIPE_GREEN_LIGHT;
+  const mid = golden ? PIPE_GOLD : PIPE_GREEN;
+  const border = golden ? PIPE_GOLD_BORDER : PIPE_BORDER;
+  const edge = golden ? '#997A1A' : '#3E7B1E';
+
   const pipeGrad = ctx.createLinearGradient(x, 0, x + w, 0);
-  pipeGrad.addColorStop(0, PIPE_GREEN_DARK);
-  pipeGrad.addColorStop(0.15, PIPE_GREEN_LIGHT);
-  pipeGrad.addColorStop(0.4, PIPE_GREEN);
-  pipeGrad.addColorStop(0.85, PIPE_GREEN_DARK);
-  pipeGrad.addColorStop(1, '#3E7B1E');
+  pipeGrad.addColorStop(0, dark);
+  pipeGrad.addColorStop(0.15, light);
+  pipeGrad.addColorStop(0.4, mid);
+  pipeGrad.addColorStop(0.85, dark);
+  pipeGrad.addColorStop(1, edge);
   ctx.fillStyle = pipeGrad;
   ctx.fillRect(x, y, w, h);
 
@@ -176,21 +303,28 @@ function drawPipeSection(ctx, x, y, w, h) {
   ctx.fillStyle = 'rgba(0,0,0,0.12)';
   ctx.fillRect(x + w - 8, y, 8, h);
 
-  ctx.strokeStyle = PIPE_BORDER;
+  ctx.strokeStyle = border;
   ctx.lineWidth = 2;
   ctx.strokeRect(x, y, w, h);
 }
 
-function drawPipeCap(ctx, x, y, w, h) {
+function drawPipeCap(ctx, x, y, w, h, golden = false) {
+  const mid = golden ? PIPE_GOLD : PIPE_GREEN;
+  const light = golden ? PIPE_GOLD_LIGHT : PIPE_GREEN_LIGHT;
+  const dark = golden ? PIPE_GOLD_DARK : PIPE_GREEN_DARK;
+  const border = golden ? PIPE_GOLD_BORDER : PIPE_BORDER;
+  const edgeStart = golden ? '#997A1A' : '#3E7B1E';
+  const edgeEnd = golden ? '#806515' : '#2D5E15';
+
   const capGrad = ctx.createLinearGradient(x, 0, x + w, 0);
-  capGrad.addColorStop(0, '#3E7B1E');
-  capGrad.addColorStop(0.15, PIPE_GREEN);
-  capGrad.addColorStop(0.4, PIPE_GREEN_LIGHT);
-  capGrad.addColorStop(0.85, PIPE_GREEN_DARK);
-  capGrad.addColorStop(1, '#2D5E15');
+  capGrad.addColorStop(0, edgeStart);
+  capGrad.addColorStop(0.15, mid);
+  capGrad.addColorStop(0.4, light);
+  capGrad.addColorStop(0.85, dark);
+  capGrad.addColorStop(1, edgeEnd);
   ctx.fillStyle = capGrad;
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = PIPE_BORDER;
+  ctx.strokeStyle = border;
   ctx.lineWidth = 2;
   ctx.strokeRect(x, y, w, h);
 }
@@ -200,9 +334,61 @@ function drawPipeCap(ctx, x, y, w, h) {
 // ============================================================
 export function drawGate(ctx, gate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS) {
   const { x, topPassageY, question, passed, result } = gate;
+  const golden = gate.golden || false;
   const capH = 10;
   const capExtra = 12;
 
+  if (golden) {
+    // Golden gate: single wide passage (like classic Flappy Bird pipes)
+    const gapCenter = topPassageY + PASSAGE_HEIGHT;
+    const gapHalf = PASSAGE_HEIGHT;
+    const gapTop = gapCenter - gapHalf / 2;
+    const gapBottom = gapCenter + gapHalf / 2;
+    const groundY = H - GROUND_HEIGHT;
+
+    // Top pipe
+    if (gapTop > 0) {
+      drawPipeSection(ctx, x, 0, GATE_WIDTH, gapTop - capH, true);
+      drawPipeCap(ctx, x - capExtra / 2, gapTop - capH, GATE_WIDTH + capExtra, capH, true);
+    }
+
+    // Bottom pipe
+    if (gapBottom < groundY) {
+      drawPipeCap(ctx, x - capExtra / 2, gapBottom, GATE_WIDTH + capExtra, capH, true);
+      drawPipeSection(ctx, x, gapBottom + capH, GATE_WIDTH, groundY - gapBottom - capH, true);
+    }
+
+    // Golden glow
+    if (!passed) {
+      ctx.fillStyle = 'rgba(255,215,0,0.08)';
+      ctx.fillRect(x, gapTop, GATE_WIDTH, gapBottom - gapTop);
+
+      ctx.save();
+      ctx.globalAlpha = 0.6 + Math.sin(Date.now() * 0.004) * 0.3;
+      ctx.font = 'bold 20px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#FFD700';
+      ctx.fillText('\u2B50', x + GATE_WIDTH / 2, gapCenter);
+      ctx.restore();
+    }
+
+    if (question && !passed) {
+      const halfGap = (gapBottom - gapTop) / 2;
+      drawAnswerBadge(ctx, x, gapTop, GATE_WIDTH, halfGap, 'A', question.a);
+      drawAnswerBadge(ctx, x, gapTop + halfGap, GATE_WIDTH, halfGap, 'B', question.b);
+    }
+
+    if (result) {
+      const gapHalfH = (gapBottom - gapTop) / 2;
+      const passageY = result.chose === 'a' ? gapTop : gapTop + gapHalfH;
+      const color = result.correct ? 'rgba(76,175,80,0.4)' : 'rgba(244,67,54,0.4)';
+      ctx.fillStyle = color;
+      ctx.fillRect(x, passageY, GATE_WIDTH, gapHalfH);
+    }
+    return;
+  }
+
+  // Normal gate: two passages separated by middle wall
   const topWallBottom = topPassageY;
   const midWallTop = topPassageY + PASSAGE_HEIGHT;
   const midWallBottom = midWallTop + WALL_THICKNESS;

@@ -40,12 +40,57 @@ export function emitHeartParticles(x, y) {
   createParticle({ x, y, color: '#FFB6C1', shape: 'heart', count: 4, speed: 2, life: 35, size: 4 });
 }
 
+export function emitComboTrail(x, y) {
+  const colors = ['#FF6600', '#FF9900', '#FFCC00', '#FF3300'];
+  for (let i = 0; i < 3; i++) {
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    particles.push({
+      x: x - 10 + (Math.random() - 0.5) * 8,
+      y: y + (Math.random() - 0.5) * 14,
+      vx: -1.5 - Math.random() * 1.5,
+      vy: (Math.random() - 0.5) * 1.5,
+      life: 18 + Math.floor(Math.random() * 10),
+      maxLife: 28,
+      color,
+      shape: 'spark',
+      size: 2 + Math.random() * 3,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.3,
+    });
+  }
+}
+
+export function emitCoinParticles(x, y) {
+  createParticle({ x, y, color: '#FFD700', shape: 'star', count: 6, speed: 2.5, life: 25, size: 3 });
+}
+
+export function emitConfetti(W) {
+  const colors = ['#FF4081', '#FF6D00', '#FFD600', '#00E676', '#2979FF', '#D500F9', '#00BCD4', '#FF1744'];
+  const count = 40;
+  for (let i = 0; i < count; i++) {
+    const color = colors[i % colors.length];
+    particles.push({
+      x: Math.random() * W,
+      y: -10 - Math.random() * 40,
+      vx: (Math.random() - 0.5) * 3,
+      vy: 1.5 + Math.random() * 2.5,
+      life: 90 + Math.floor(Math.random() * 40),
+      maxLife: 130,
+      color,
+      shape: 'confetti',
+      size: 4 + Math.random() * 4,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.3,
+    });
+  }
+}
+
 export function updateParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.x += p.vx;
     p.y += p.vy;
-    p.vy += 0.08; // gravity
+    p.vy += (p.shape === 'confetti') ? 0.02 : 0.08; // gravity (lighter for confetti)
     p.life--;
     p.rotation += p.rotSpeed;
     if (p.life <= 0) {
@@ -93,6 +138,12 @@ export function drawParticles(ctx) {
       drawStar(ctx, p.x, p.y, p.size, p.rotation);
     } else if (p.shape === 'heart') {
       drawHeart(ctx, p.x, p.y, p.size, p.rotation);
+    } else if (p.shape === 'confetti') {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
     } else if (p.shape === 'spark') {
       ctx.save();
       ctx.translate(p.x, p.y);

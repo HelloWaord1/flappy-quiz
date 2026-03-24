@@ -25,3 +25,13 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #4EC0CA; f
 .share-buttons { display: flex; gap: 10px; }
 .btn-primary { flex: 1; padding: 14px; background: #4EC0CA; color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; }
 .btn-secondary { flex: 1; padding: 14px; background: #FF6B35; color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; }
+.btn-continue { flex: 1; padding: 14px; background: #8BC34A; color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; }
+.btn-continue:active { transform: scale(0.97); }
+
+/* High score */
+.highscore-text { color: #888; font-size: 14px; margin-bottom: 4px; }
+.new-record-text { color: #FF6B35; font-size: 18px; font-weight: bold; margin-bottom: 8px; animation: pulse-record 0.6s ease-in-out infinite alternate; }
+@keyframes pulse-record { from { transform: scale(1); } to { transform: scale(1.08); } }
+
+/* Share buttons wrap */
+.share-buttons { display: flex; flex-wrap: wrap; gap: 10px; }

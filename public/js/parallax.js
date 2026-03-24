@@ -1,26 +1,65 @@
 // ============================================================
 // PARALLAX BACKGROUND — Flappy Bird style
 // ============================================================
-// 3 layers: sky+clouds → soft hills → trees+bushes → ground
+// 3 layers: sky+clouds -> soft hills -> trees+bushes -> ground
+// Phase support: 1=day, 2=night (handled elsewhere), 3=sunset
 
-export function drawParallaxBackground(ctx, W, H, groundHeight, groundOffset) {
+// Animated background objects state (seeded once)
+const BG_OBJECTS = [
+  { baseX: 0, y: 55, type: 'bird', speed: 0.12 },
+  { baseX: 300, y: 30, type: 'balloon', speed: 0.08 },
+  { baseX: 600, y: 70, type: 'bird', speed: 0.10 },
+  { baseX: 900, y: 45, type: 'balloon', speed: 0.06 },
+];
+
+const BG_OBJECTS_P3 = [
+  { baseX: 0, y: 40, type: 'plane', speed: 0.15 },
+  { baseX: 400, y: 25, type: 'star', speed: 0.04, blinkOffset: 0 },
+  { baseX: 700, y: 55, type: 'plane', speed: 0.12 },
+  { baseX: 200, y: 15, type: 'star', speed: 0.03, blinkOffset: 2 },
+];
+
+let bgFrameCount = 0;
+
+export function drawParallaxBackground(ctx, W, H, groundHeight, groundOffset, phase) {
   const groundY = H - groundHeight;
+  const isPhase3 = phase === 3;
+  bgFrameCount++;
 
   // === Sky gradient ===
   const skyGrad = ctx.createLinearGradient(0, 0, 0, groundY);
-  skyGrad.addColorStop(0, '#4EC0CA');
-  skyGrad.addColorStop(0.6, '#87CEEB');
-  skyGrad.addColorStop(1, '#B0E0E6');
+  if (isPhase3) {
+    skyGrad.addColorStop(0, '#1a1a2e');
+    skyGrad.addColorStop(0.4, '#2d1b4e');
+    skyGrad.addColorStop(0.7, '#4a2060');
+    skyGrad.addColorStop(1, '#6b3a7a');
+  } else {
+    skyGrad.addColorStop(0, '#4EC0CA');
+    skyGrad.addColorStop(0.6, '#87CEEB');
+    skyGrad.addColorStop(1, '#B0E0E6');
+  }
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, W, groundY);
 
+  // === Stars (phase 3 only) ===
+  if (isPhase3) {
+    drawStars(ctx, W, groundY, groundOffset);
+  }
+
+  // === Animated background objects (very slow, far away) ===
+  drawBackgroundObjects(ctx, W, groundY, groundOffset, isPhase3);
+
   // === Clouds (very slow) ===
-  drawClouds(ctx, W, groundOffset * 0.15);
+  if (!isPhase3) {
+    drawClouds(ctx, W, groundOffset * 0.15);
+  }
 
   // === Far hills (0.2x speed) — soft rounded ===
+  const farHillColor1 = isPhase3 ? 'rgba(60,40,80,0.5)' : 'rgba(120,160,130,0.4)';
+  const farHillColor2 = isPhase3 ? 'rgba(40,25,60,0.35)' : 'rgba(100,145,115,0.25)';
   drawHills(ctx, W, groundY, groundOffset * 0.2, {
-    color1: 'rgba(120,160,130,0.4)',
-    color2: 'rgba(100,145,115,0.25)',
+    color1: farHillColor1,
+    color2: farHillColor2,
     baseHeight: 60,
     amplitude: 35,
     frequency: 0.004,
@@ -28,9 +67,11 @@ export function drawParallaxBackground(ctx, W, H, groundHeight, groundOffset) {
   });
 
   // === Near hills (0.4x speed) — slightly darker ===
+  const nearHillColor1 = isPhase3 ? 'rgba(40,30,60,0.55)' : 'rgba(80,130,80,0.45)';
+  const nearHillColor2 = isPhase3 ? 'rgba(25,18,40,0.4)' : 'rgba(60,110,60,0.3)';
   drawHills(ctx, W, groundY, groundOffset * 0.4, {
-    color1: 'rgba(80,130,80,0.45)',
-    color2: 'rgba(60,110,60,0.3)',
+    color1: nearHillColor1,
+    color2: nearHillColor2,
     baseHeight: 40,
     amplitude: 25,
     frequency: 0.006,
@@ -38,13 +79,163 @@ export function drawParallaxBackground(ctx, W, H, groundHeight, groundOffset) {
   });
 
   // === Trees (0.55x speed) ===
-  drawTreeRow(ctx, W, groundY, groundOffset * 0.55);
+  drawTreeRow(ctx, W, groundY, groundOffset * 0.55, isPhase3);
 
   // === Bushes (0.7x speed) ===
-  drawBushRow(ctx, W, groundY, groundOffset * 0.7);
+  drawBushRow(ctx, W, groundY, groundOffset * 0.7, isPhase3);
 
   // === Ground ===
-  drawGround(ctx, W, H, groundHeight, groundOffset);
+  drawGround(ctx, W, H, groundHeight, groundOffset, isPhase3);
+}
+
+// ============================================================
+// STARS — twinkling background for phase 3
+// ============================================================
+function drawStars(ctx, W, groundY, offset) {
+  const starCount = 30;
+  const loopW = 1400;
+  for (let i = 0; i < starCount; i++) {
+    // Deterministic position from seed
+    const seed1 = ((i * 7919 + 31) % 1000) / 1000;
+    const seed2 = ((i * 6271 + 97) % 1000) / 1000;
+    const seed3 = ((i * 3571 + 53) % 1000) / 1000;
+    const baseX = seed1 * loopW;
+    const sy = seed2 * (groundY * 0.5);
+    const sx = ((baseX - offset * 0.05) % loopW + loopW) % loopW;
+    if (sx > W + 10) continue;
+
+    // Twinkle
+    const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(bgFrameCount * 0.02 + seed3 * 10));
+    const size = 1 + seed3 * 2;
+
+    ctx.save();
+    ctx.globalAlpha = twinkle;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(sx, sy, size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// ANIMATED BACKGROUND OBJECTS — far, slow-moving
+// ============================================================
+function drawBackgroundObjects(ctx, W, groundY, groundOffset, isPhase3) {
+  const objects = isPhase3 ? BG_OBJECTS_P3 : BG_OBJECTS;
+  const loopW = 1200;
+
+  for (const obj of objects) {
+    const ox = ((obj.baseX - groundOffset * obj.speed) % loopW + loopW) % loopW;
+    if (ox > W + 60) continue;
+
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+
+    if (obj.type === 'bird') {
+      drawFlyingBird(ctx, ox, obj.y, groundOffset);
+    } else if (obj.type === 'balloon') {
+      drawBalloon(ctx, ox, obj.y);
+    } else if (obj.type === 'plane') {
+      drawPlane(ctx, ox, obj.y);
+    } else if (obj.type === 'star') {
+      const blink = 0.4 + 0.6 * Math.abs(Math.sin(bgFrameCount * 0.03 + (obj.blinkOffset || 0)));
+      ctx.globalAlpha = 0.5 * blink;
+      drawBigStar(ctx, ox, obj.y);
+    }
+
+    ctx.restore();
+  }
+}
+
+// V-shape bird flock
+function drawFlyingBird(ctx, x, y, offset) {
+  const wingFlap = Math.sin(offset * 0.01) * 3;
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x - 8, y + wingFlap);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + 8, y + wingFlap);
+  ctx.stroke();
+  // Second bird slightly behind
+  ctx.beginPath();
+  ctx.moveTo(x - 14, y + 6 + wingFlap * 0.8);
+  ctx.lineTo(x - 6, y + 6);
+  ctx.lineTo(x + 2, y + 6 + wingFlap * 0.8);
+  ctx.stroke();
+}
+
+// Hot air balloon
+function drawBalloon(ctx, x, y) {
+  // Balloon body (circle)
+  ctx.fillStyle = '#E74C3C';
+  ctx.beginPath();
+  ctx.arc(x, y, 10, 0, Math.PI * 2);
+  ctx.fill();
+  // Stripe
+  ctx.fillStyle = '#F39C12';
+  ctx.beginPath();
+  ctx.arc(x, y, 10, -0.3, 0.3);
+  ctx.lineTo(x, y + 10);
+  ctx.fill();
+  // Basket (trapezoid)
+  ctx.fillStyle = '#8D6E63';
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y + 12);
+  ctx.lineTo(x + 4, y + 12);
+  ctx.lineTo(x + 3, y + 16);
+  ctx.lineTo(x - 3, y + 16);
+  ctx.closePath();
+  ctx.fill();
+  // Ropes
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(x - 3, y + 10);
+  ctx.lineTo(x - 4, y + 12);
+  ctx.moveTo(x + 3, y + 10);
+  ctx.lineTo(x + 4, y + 12);
+  ctx.stroke();
+}
+
+// Small airplane silhouette
+function drawPlane(ctx, x, y) {
+  ctx.fillStyle = '#aaa';
+  // Fuselage
+  ctx.beginPath();
+  ctx.ellipse(x, y, 14, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Wings
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y);
+  ctx.lineTo(x - 2, y - 8);
+  ctx.lineTo(x + 4, y);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y);
+  ctx.lineTo(x - 2, y + 8);
+  ctx.lineTo(x + 4, y);
+  ctx.fill();
+  // Tail
+  ctx.beginPath();
+  ctx.moveTo(x - 12, y);
+  ctx.lineTo(x - 14, y - 4);
+  ctx.lineTo(x - 10, y);
+  ctx.fill();
+}
+
+// Big decorative star (phase 3)
+function drawBigStar(ctx, x, y) {
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const angle = (i * 4 * Math.PI) / 5 - Math.PI / 2;
+    const method = i === 0 ? 'moveTo' : 'lineTo';
+    ctx[method](x + Math.cos(angle) * 6, y + Math.sin(angle) * 6);
+  }
+  ctx.closePath();
+  ctx.fill();
 }
 
 // ============================================================
@@ -110,7 +301,7 @@ function drawHills(ctx, W, groundY, offset, opts) {
 // ============================================================
 // TREES — simple ellipse canopy on trunk
 // ============================================================
-function drawTreeRow(ctx, W, groundY, offset) {
+function drawTreeRow(ctx, W, groundY, offset, isPhase3) {
   const spacing = 55;
   const loopW = spacing * 25;
   const off = offset % loopW;
@@ -126,13 +317,18 @@ function drawTreeRow(ctx, W, groundY, offset) {
     const canopyW = 12 + seed * 8;
 
     // Trunk
-    ctx.fillStyle = '#6D4C41';
+    ctx.fillStyle = isPhase3 ? '#4E342E' : '#6D4C41';
     ctx.fillRect(tx - 2.5, groundY - h * 0.35, 5, h * 0.35);
 
     // Canopy
     const cGrad = ctx.createRadialGradient(tx, groundY - h * 0.55, 2, tx, groundY - h * 0.5, canopyW);
-    cGrad.addColorStop(0, '#66BB6A');
-    cGrad.addColorStop(1, '#2E7D32');
+    if (isPhase3) {
+      cGrad.addColorStop(0, '#2E4A3E');
+      cGrad.addColorStop(1, '#1B3A2A');
+    } else {
+      cGrad.addColorStop(0, '#66BB6A');
+      cGrad.addColorStop(1, '#2E7D32');
+    }
     ctx.fillStyle = cGrad;
     ctx.beginPath();
     ctx.ellipse(tx, groundY - h * 0.55, canopyW, h * 0.4, 0, 0, Math.PI * 2);
@@ -143,7 +339,7 @@ function drawTreeRow(ctx, W, groundY, offset) {
 // ============================================================
 // BUSHES — small green ellipses near ground
 // ============================================================
-function drawBushRow(ctx, W, groundY, offset) {
+function drawBushRow(ctx, W, groundY, offset, isPhase3) {
   const spacing = 40;
   const loopW = spacing * 30;
   const off = offset % loopW;
@@ -157,8 +353,13 @@ function drawBushRow(ctx, W, groundY, offset) {
     const r = 8 + seed * 7;
 
     const bGrad = ctx.createRadialGradient(bx, groundY - r * 0.25, 1, bx, groundY - r * 0.2, r);
-    bGrad.addColorStop(0, '#7CB342');
-    bGrad.addColorStop(1, '#33691E');
+    if (isPhase3) {
+      bGrad.addColorStop(0, '#3E5E4A');
+      bGrad.addColorStop(1, '#1A3320');
+    } else {
+      bGrad.addColorStop(0, '#7CB342');
+      bGrad.addColorStop(1, '#33691E');
+    }
     ctx.fillStyle = bGrad;
     ctx.beginPath();
     ctx.ellipse(bx, groundY - r * 0.25, r, r * 0.55, 0, 0, Math.PI * 2);
@@ -169,27 +370,39 @@ function drawBushRow(ctx, W, groundY, offset) {
 // ============================================================
 // GROUND — textured with grass blades
 // ============================================================
-function drawGround(ctx, W, H, groundHeight, offset) {
+function drawGround(ctx, W, H, groundHeight, offset, isPhase3) {
   const gy = H - groundHeight;
 
   // Main fill
   const gGrad = ctx.createLinearGradient(0, gy, 0, H);
-  gGrad.addColorStop(0, '#C8A951');
-  gGrad.addColorStop(0.3, '#DED895');
-  gGrad.addColorStop(1, '#B89A3D');
+  if (isPhase3) {
+    gGrad.addColorStop(0, '#3E2723');
+    gGrad.addColorStop(0.3, '#4E342E');
+    gGrad.addColorStop(1, '#2E1B11');
+  } else {
+    gGrad.addColorStop(0, '#C8A951');
+    gGrad.addColorStop(0.3, '#DED895');
+    gGrad.addColorStop(1, '#B89A3D');
+  }
   ctx.fillStyle = gGrad;
   ctx.fillRect(0, gy, W, groundHeight);
 
   // Grass strip
   const grassGrad = ctx.createLinearGradient(0, gy - 3, 0, gy + 8);
-  grassGrad.addColorStop(0, '#4CAF50');
-  grassGrad.addColorStop(0.5, '#388E3C');
-  grassGrad.addColorStop(1, '#C8A951');
+  if (isPhase3) {
+    grassGrad.addColorStop(0, '#2E4A3E');
+    grassGrad.addColorStop(0.5, '#1B3A2A');
+    grassGrad.addColorStop(1, '#3E2723');
+  } else {
+    grassGrad.addColorStop(0, '#4CAF50');
+    grassGrad.addColorStop(0.5, '#388E3C');
+    grassGrad.addColorStop(1, '#C8A951');
+  }
   ctx.fillStyle = grassGrad;
   ctx.fillRect(0, gy - 2, W, 10);
 
   // Grass blades
-  ctx.fillStyle = '#43A047';
+  ctx.fillStyle = isPhase3 ? '#2E5E3E' : '#43A047';
   const gOff = offset % 14;
   for (let x = -gOff; x < W + 14; x += 14) {
     ctx.beginPath();

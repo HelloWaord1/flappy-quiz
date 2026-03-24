@@ -1,9 +1,9 @@
 import { phase1Questions, phase2Questions, phase3Scenarios } from './data/questions.js';
 import { drawParallaxBackground } from './parallax.js';
-import { emitCorrectParticles, emitWrongParticles, emitHeartParticles, updateParticles, drawParticles } from './particles.js';
+import { emitCorrectParticles, emitWrongParticles, emitHeartParticles, emitComboTrail, emitCoinParticles, updateParticles, drawParticles } from './particles.js';
 import { addFloatingText, updateFloatingTexts, drawFloatingTexts } from './floatingText.js';
-import { drawText, drawRoundRect, drawBird, drawGate, drawCanvasHeart } from './drawing.js';
-import { playFlap, playCorrect, playWrong, playHeartPickup, playGameOver, playPhaseUnlock } from './sounds.js';
+import { drawText, drawRoundRect, drawBird, drawGate, drawCanvasHeart, updateTrail, clearTrail, drawBirdTrail } from './drawing.js';
+import { playFlap, playCorrect, playWrong, playHeartPickup, playGameOver, playPhaseUnlock, playCoin, playCombo } from './sounds.js';
 
 // ============================================================
 // CONFIG
@@ -22,6 +22,16 @@ const HEART_SIZE = 22;
 const TEXT_WHITE = '#FFFFFF';
 const CORRECT_COLOR = '#4CAF50';
 const WRONG_COLOR = '#F44336';
+const COIN_RADIUS = 10;
+const COIN_POINTS = 5;
+const COIN_COLLECT_RADIUS = 28;
+const COMBO_THRESHOLDS = [
+  { streak: 7, multiplier: 5, label: 'x5' },
+  { streak: 5, multiplier: 3, label: 'x3' },
+  { streak: 3, multiplier: 2, label: 'x2' },
+];
+const GOLDEN_GATE_INTERVAL = 5;
+const GOLDEN_SCORE_MULTIPLIER = 3;
 
 // ============================================================
 // CANVAS SETUP
@@ -64,6 +74,7 @@ let state = {
   invincible: false,
   invincibleTimer: 0,
   hearts: [],
+  coins: [],
   fadeAlpha: 0,
   fadeDirection: 0,
   fadeCallback: null,
@@ -102,7 +113,9 @@ function resetPhase1() {
   state.invincible = false;
   state.invincibleTimer = 0;
   state.hearts = [];
+  state.coins = [];
   state.heartPulse = [0, 0, 0];
+  clearTrail();
   resetBird();
   spawnGate();
   startFadeIn();
@@ -245,7 +258,35 @@ function spawnGate() {
   const topPassageY = minTop + Math.random() * Math.max(maxTop - minTop, 0);
   const lastGate = state.gates[state.gates.length - 1];
   const startX = lastGate ? Math.max(W + 80, lastGate.x + GATE_SPACING) : W + 120;
-  state.gates.push({ x: startX, topPassageY, qIndex, passed: false, scored: false, result: null });
+  // Every 5th question (index 4, 9, etc.) is a golden gate
+  const golden = (qIndex + 1) % GOLDEN_GATE_INTERVAL === 0;
+  state.gates.push({ x: startX, topPassageY, qIndex, passed: false, scored: false, result: null, golden });
+
+  // Spawn coins between previous gate and this one
+  if (lastGate) {
+    spawnCoinsBetweenGates(lastGate.x + GATE_WIDTH, startX);
+  }
+}
+
+function spawnCoinsBetweenGates(fromX, toX) {
+  const coinCount = 3 + Math.floor(Math.random() * 3); // 3-5 coins
+  const midX = (fromX + toX) / 2;
+  const spread = (toX - fromX) * 0.5;
+  const groundY = H - GROUND_HEIGHT;
+  const centerY = 100 + Math.random() * (groundY - 220);
+
+  for (let i = 0; i < coinCount; i++) {
+    const t = (i / (coinCount - 1)) - 0.5; // -0.5 to 0.5
+    const coinX = midX + t * spread;
+    // Arc shape: highest in middle
+    const arcY = centerY - (1 - t * t * 4) * 30;
+    state.coins.push({
+      x: coinX,
+      y: Math.max(50, Math.min(groundY - 50, arcY)),
+      collected: false,
+      seed: Math.random() * 100,
+    });
+  }
 }
 
 // Resolve question for a gate dynamically (always uses current mapping)
@@ -260,6 +301,18 @@ function checkGateCollision(gate) {
   const { x: bx, y: by } = state.bird;
   const r = BIRD_SIZE / 2 - 3;
   if (bx + r < gate.x || bx - r > gate.x + GATE_WIDTH) return false;
+
+  if (gate.golden) {
+    // Golden gate: single passage
+    const gapCenter = gate.topPassageY + PASSAGE_HEIGHT;
+    const gapHalf = PASSAGE_HEIGHT;
+    const gapTop = gapCenter - gapHalf / 2;
+    const gapBottom = gapCenter + gapHalf / 2;
+    if (by - r < gapTop) return true;
+    if (by + r > gapBottom) return true;
+    return false;
+  }
+
   const midWallTop = gate.topPassageY + PASSAGE_HEIGHT;
   const midWallBottom = midWallTop + WALL_THICKNESS;
   const botPassageBottom = midWallBottom + PASSAGE_HEIGHT;
@@ -267,6 +320,13 @@ function checkGateCollision(gate) {
   if (by + r > midWallTop && by - r < midWallBottom) return true;
   if (by + r > botPassageBottom) return true;
   return false;
+}
+
+function getComboMultiplier(streak) {
+  for (const t of COMBO_THRESHOLDS) {
+    if (streak >= t.streak) return t;
+  }
+  return null;
 }
 
 function triggerDamage() {
@@ -290,8 +350,17 @@ function handleGatePass(gate) {
 
   gate.scored = true;
   gate.passed = true;
-  const midWallCenter = gate.topPassageY + PASSAGE_HEIGHT + WALL_THICKNESS / 2;
-  const chose = state.bird.y < midWallCenter ? 'a' : 'b';
+
+  // Determine which passage the bird chose
+  let chose;
+  if (gate.golden) {
+    // Golden gate: single passage split into top half (A) and bottom half (B)
+    const gapCenter = gate.topPassageY + PASSAGE_HEIGHT;
+    chose = state.bird.y < gapCenter ? 'a' : 'b';
+  } else {
+    const midWallCenter = gate.topPassageY + PASSAGE_HEIGHT + WALL_THICKNESS / 2;
+    chose = state.bird.y < midWallCenter ? 'a' : 'b';
+  }
   const correct = chose === question.correct;
   gate.result = { chose, correct };
 
@@ -300,12 +369,39 @@ function handleGatePass(gate) {
   }
 
   if (correct) {
-    state.score += 10;
-    state.feedbackCorrect = true;
     state.correctStreak++;
+    let basePoints = 10;
+
+    // Golden gate bonus: x3 points
+    if (gate.golden) {
+      basePoints = basePoints * GOLDEN_SCORE_MULTIPLIER;
+    }
+
+    // Combo multiplier
+    const combo = getComboMultiplier(state.correctStreak);
+    const multiplier = combo ? combo.multiplier : 1;
+    const points = basePoints * multiplier;
+
+    state.score += points;
+    state.feedbackCorrect = true;
     state.flashColor = 'rgb(76,175,80)';
     emitCorrectParticles(state.bird.x, state.bird.y);
-    addFloatingText(state.bird.x + 30, state.bird.y - 20, '+10', '#4CAF50', 24);
+
+    // Build floating text
+    let floatText = `+${points}`;
+    if (gate.golden) floatText = `\u2B50 ${floatText}`;
+    addFloatingText(state.bird.x + 30, state.bird.y - 20, floatText, '#4CAF50', 24);
+
+    // Show combo text if active
+    if (combo) {
+      addFloatingText(
+        state.bird.x, state.bird.y - 50,
+        `\uD83D\uDD25 COMBO ${combo.label}!`,
+        '#FF6600', 28
+      );
+      playCombo();
+    }
+
     playCorrect();
   } else {
     state.lives--;
@@ -405,7 +501,9 @@ function startPhase3() {
   state.balance = 1000;
   state.p3TradeCount = 0;
   state.gates = [];
+  state.coins = [];
   state.showingFeedback = false;
+  clearTrail();
   resetBird();
   startFadeIn();
 
@@ -629,6 +727,28 @@ function update() {
     }
     state.hearts = state.hearts.filter(h => !h.collected && h.x > -30);
 
+    // Coin pickups
+    for (const c of state.coins) {
+      if (c.collected) continue;
+      c.x -= SCROLL_SPEED;
+      const dx = state.bird.x - c.x;
+      const dy = state.bird.y - c.y;
+      if (Math.sqrt(dx * dx + dy * dy) < COIN_COLLECT_RADIUS) {
+        c.collected = true;
+        state.score += COIN_POINTS;
+        emitCoinParticles(c.x, c.y);
+        addFloatingText(c.x, c.y - 15, `+${COIN_POINTS}`, '#FFD700', 18);
+        playCoin();
+      }
+    }
+    state.coins = state.coins.filter(c => !c.collected && c.x > -30);
+
+    // Combo trail: emit fire particles behind bird when combo >= 3
+    updateTrail(state.bird.x, state.bird.y);
+    if (state.correctStreak >= 3 && state.frameCount % 2 === 0) {
+      emitComboTrail(state.bird.x, state.bird.y);
+    }
+
     for (const g of state.gates) g.x -= SCROLL_SPEED;
     state.gates = state.gates.filter(g => g.x > -GATE_WIDTH - 30);
 
@@ -776,10 +896,67 @@ function render() {
       }
     }
 
+    // Draw coins
+    for (const c of state.coins) {
+      if (c.collected) continue;
+      const bobY = Math.sin(state.frameCount * 0.06 + c.seed) * 3;
+      const sparkle = 0.7 + Math.sin(state.frameCount * 0.08 + c.seed * 2) * 0.3;
+      ctx.save();
+      ctx.translate(c.x, c.y + bobY);
+
+      // Glow
+      ctx.globalAlpha = 0.2 * sparkle;
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.arc(0, 0, COIN_RADIUS * 1.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Coin body
+      ctx.globalAlpha = sparkle;
+      const coinGrad = ctx.createRadialGradient(-2, -2, 1, 0, 0, COIN_RADIUS);
+      coinGrad.addColorStop(0, '#FFF176');
+      coinGrad.addColorStop(0.6, '#FFD700');
+      coinGrad.addColorStop(1, '#DAA520');
+      ctx.fillStyle = coinGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, COIN_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#B8860B';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // "$" symbol
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#8B6914';
+      ctx.font = 'bold 11px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('$', 0, 0.5);
+
+      ctx.restore();
+    }
+
+    // Bird trail (combo glow effect)
+    drawBirdTrail(ctx, state.correctStreak >= 3);
+
     drawBird(ctx, state.bird, state.hurtTimer, H - GROUND_HEIGHT);
     drawParticles(ctx);
     drawFloatingTexts(ctx);
     drawHUD();
+
+    // Combo indicator in HUD
+    if (state.correctStreak >= 3 && (state.scene === 'phase1' || state.scene === 'phase3')) {
+      const combo = getComboMultiplier(state.correctStreak);
+      if (combo) {
+        const comboText = `\uD83D\uDD25 ${combo.label}`;
+        const pulseScale = 1 + Math.sin(state.frameCount * 0.1) * 0.08;
+        ctx.save();
+        ctx.translate(W / 2, 88);
+        ctx.scale(pulseScale, pulseScale);
+        drawText(ctx, comboText, 0, 0, 20, '#FF6600');
+        ctx.restore();
+      }
+    }
 
     if (state.scene === 'phase1') drawQuestionBanner();
     if (state.scene === 'phase3') drawPhase3HUD();

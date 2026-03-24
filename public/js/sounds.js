@@ -81,6 +81,29 @@ export function playGameOver() {
   playTone({ frequency: 400, endFrequency: 100, duration: 0.5, type: 'sine', volume: 0.15 });
 }
 
+export function playCoin() {
+  playTone({ frequency: 1200, endFrequency: 1800, duration: 0.06, type: 'sine', volume: 0.1 });
+}
+
+export function playCombo() {
+  const ctx = getAudioContext();
+  const now = ctx.currentTime;
+  const notes = [600, 800, 1000];
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now + i * 0.04);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.setValueAtTime(0.08, now + i * 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.04 + 0.08);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now + i * 0.04);
+    osc.stop(now + i * 0.04 + 0.08);
+  });
+}
+
 export function playPhaseUnlock() {
   const ctx = getAudioContext();
   const now = ctx.currentTime;
