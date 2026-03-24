@@ -144,11 +144,11 @@ function drawFade() {
 // QUESTION DISPLAY (center + banner transition)
 // ============================================================
 function drawQuestionBanner() {
-  const qi = state.questionIndex;
-  const q = qi < phase1Questions.length ? phase1Questions[qi] : null;
+  const nextGate = state.gates.find(g => !g.scored);
+  const q = nextGate ? getGateQuestion(nextGate) : null;
   if (!q) return;
 
-  const nextGate = state.gates.find(g => !g.scored);
+  const qi = nextGate.qIndex != null ? nextGate.qIndex : state.questionIndex;
   const gateDistance = nextGate ? nextGate.x - state.bird.x : 999;
   const t = nextGate
     ? Math.max(0, Math.min(1, (gateDistance - 120) / 130))
@@ -229,14 +229,23 @@ function drawFeedbackText() {
 // GATE LOGIC
 // ============================================================
 function spawnGate() {
-  const q = state.questionIndex < phase1Questions.length ? phase1Questions[state.questionIndex] : null;
+  // Store questionIndex at spawn time — question will be resolved dynamically
+  const qIndex = state.questionIndex + state.gates.filter(g => !g.scored).length;
   const totalH = PASSAGE_HEIGHT * 2 + WALL_THICKNESS;
   const minTop = 80;
   const maxTop = H - GROUND_HEIGHT - totalH - 40;
   const topPassageY = minTop + Math.random() * Math.max(maxTop - minTop, 0);
   const lastGate = state.gates[state.gates.length - 1];
   const startX = lastGate ? Math.max(W + 80, lastGate.x + GATE_SPACING) : W + 120;
-  state.gates.push({ x: startX, topPassageY, question: q, passed: false, scored: false, result: null });
+  state.gates.push({ x: startX, topPassageY, qIndex, passed: false, scored: false, result: null });
+}
+
+// Resolve question for a gate dynamically (always uses current mapping)
+function getGateQuestion(gate) {
+  if (gate.qIndex != null && gate.qIndex < phase1Questions.length) {
+    return phase1Questions[gate.qIndex];
+  }
+  return gate.question || null;
 }
 
 function checkGateCollision(gate) {
@@ -266,18 +275,19 @@ function triggerDamage() {
 }
 
 function handleGatePass(gate) {
-  if (gate.scored || !gate.question) return;
+  const question = getGateQuestion(gate);
+  if (gate.scored || !question) return;
   if (state.bird.x <= gate.x + GATE_WIDTH) return;
 
   gate.scored = true;
   gate.passed = true;
   const midWallCenter = gate.topPassageY + PASSAGE_HEIGHT + WALL_THICKNESS / 2;
   const chose = state.bird.y < midWallCenter ? 'a' : 'b';
-  const correct = chose === gate.question.correct;
+  const correct = chose === question.correct;
   gate.result = { chose, correct };
 
-  if (gate.question.qualifying) {
-    state.qualifyAnswers[gate.question.q] = chose === 'a' ? gate.question.a : gate.question.b;
+  if (question.qualifying) {
+    state.qualifyAnswers[question.q] = chose === 'a' ? question.a : question.b;
   }
 
   if (correct) {
@@ -658,7 +668,11 @@ function render() {
     }
 
     drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset);
-    for (const g of state.gates) drawGate(ctx, g, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
+    for (const g of state.gates) {
+      // Resolve question dynamically so it always matches current state
+      const resolvedGate = { ...g, question: getGateQuestion(g) };
+      drawGate(ctx, resolvedGate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
+    }
 
     for (const h of state.hearts) {
       if (!h.collected) {
