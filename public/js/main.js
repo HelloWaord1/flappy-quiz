@@ -1,6 +1,6 @@
 import { phase1Questions, phase2Questions, phase3Scenarios } from './data/questions.js';
 import { drawParallaxBackground } from './parallax.js';
-import { emitCorrectParticles, emitWrongParticles, emitHeartParticles, emitComboTrail, emitCoinParticles, updateParticles, drawParticles } from './particles.js';
+import { emitCorrectParticles, emitWrongParticles, emitHeartParticles, emitComboTrail, emitCoinParticles, emitConfetti, updateParticles, drawParticles } from './particles.js';
 import { addFloatingText, updateFloatingTexts, drawFloatingTexts } from './floatingText.js';
 import { drawText, drawRoundRect, drawBird, drawGate, drawCanvasHeart, updateTrail, clearTrail, drawBirdTrail } from './drawing.js';
 import { playFlap, playCorrect, playWrong, playHeartPickup, playGameOver, playPhaseUnlock, playCoin, playCombo } from './sounds.js';
@@ -94,6 +94,12 @@ let state = {
   transitionText: '',
   transitionTimer: 0,
 };
+
+function getCurrentPhase() {
+  if (state.scene === 'phase3') return 3;
+  if (state.scene === 'phase2') return 2;
+  return 1;
+}
 
 function resetBird() {
   state.bird = { x: 70, y: H * 0.4, vel: 0, rotation: 0, flapFrame: 0, wingIndex: 0, wingTimer: 0 };
@@ -784,6 +790,7 @@ function update() {
             state.scene = 'transition';
             state.fadeAlpha = 0;
             state.fadeDirection = 0;
+            emitConfetti(W);
             state._transitionNext = () => {
               state.scene = 'phase2';
               state.p2Index = 0;
@@ -838,6 +845,7 @@ function update() {
           state.scene = 'transition';
           state.fadeAlpha = 0;
           state.fadeDirection = 0;
+          emitConfetti(W);
           state._transitionNext = () => startPhase3();
         });
       }
@@ -858,6 +866,7 @@ function render() {
   if (state.scene === 'transition') {
     ctx.fillStyle = '#0a0a2e';
     ctx.fillRect(0, 0, W, H);
+    drawParticles(ctx); // confetti particles
     const alpha = Math.min(1, (120 - state.transitionTimer) / 20);
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -873,7 +882,7 @@ function render() {
       ctx.translate((Math.random() - 0.5) * state.shakeIntensity, (Math.random() - 0.5) * state.shakeIntensity);
     }
 
-    drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset);
+    drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset, getCurrentPhase());
     for (const g of state.gates) {
       // Resolve question dynamically so it always matches current state
       const resolvedGate = { ...g, question: getGateQuestion(g) };
@@ -939,7 +948,7 @@ function render() {
     // Bird trail (combo glow effect)
     drawBirdTrail(ctx, state.correctStreak >= 3);
 
-    drawBird(ctx, state.bird, state.hurtTimer, H - GROUND_HEIGHT);
+    drawBird(ctx, state.bird, state.hurtTimer, H - GROUND_HEIGHT, getCurrentPhase());
     drawParticles(ctx);
     drawFloatingTexts(ctx);
     drawHUD();
