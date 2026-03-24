@@ -11,8 +11,8 @@ const GROUND_HEIGHT = 70;
 const MAX_LIVES = 3;
 const GATE_WIDTH = 100;       // width of the gate obstacle
 const GATE_SPACING = 360;     // distance between gates (more room)
-const PASSAGE_HEIGHT = 130;   // height of each answer passage (WIDER!)
-const WALL_THICKNESS = 25;    // wall between two passages
+const PASSAGE_HEIGHT = 170;   // height of each answer passage (VERY WIDE)
+const WALL_THICKNESS = 20;    // wall between two passages
 const HEART_SIZE = 22;        // collectible heart size
 
 // Colors (Flappy Bird palette)
