@@ -1,4 +1,8 @@
 import { phase1Questions, phase2Questions, phase3Scenarios } from './data/questions.js';
+import { drawParallaxBackground } from './parallax.js';
+import { emitCorrectParticles, emitWrongParticles, emitHeartParticles, updateParticles, drawParticles } from './particles.js';
+import { addFloatingText, updateFloatingTexts, drawFloatingTexts } from './floatingText.js';
+import { drawText, drawRoundRect, drawBird, drawGate, drawCanvasHeart } from './drawing.js';
 
 // ============================================================
 // CONFIG
@@ -9,24 +13,12 @@ const SCROLL_SPEED = 2;
 const BIRD_SIZE = 28;
 const GROUND_HEIGHT = 70;
 const MAX_LIVES = 3;
-const GATE_WIDTH = 100;       // width of the gate obstacle
-const GATE_SPACING = 360;     // distance between gates (more room)
-const PASSAGE_HEIGHT = 170;   // height of each answer passage (VERY WIDE)
-const WALL_THICKNESS = 20;    // wall between two passages
-const HEART_SIZE = 22;        // collectible heart size
-
-// Colors (Flappy Bird palette)
-const SKY_TOP = '#4EC0CA';
-const PIPE_GREEN = '#73BF2E';
-const PIPE_GREEN_DARK = '#558B2F';
-const PIPE_BORDER = '#2E7D32';
-const GROUND_COLOR = '#DED895';
-const GROUND_DARK = '#C8B95A';
-const BIRD_YELLOW = '#F7DC6F';
-const BIRD_ORANGE = '#F39C12';
-const BIRD_RED = '#E74C3C';
+const GATE_WIDTH = 100;
+const GATE_SPACING = 360;
+const PASSAGE_HEIGHT = 170;
+const WALL_THICKNESS = 20;
+const HEART_SIZE = 22;
 const TEXT_WHITE = '#FFFFFF';
-const TEXT_SHADOW = 'rgba(0,0,0,0.4)';
 const CORRECT_COLOR = '#4CAF50';
 const WRONG_COLOR = '#F44336';
 
@@ -55,7 +47,7 @@ window.addEventListener('resize', resize);
 // ============================================================
 let state = {
   scene: 'menu',
-  bird: { x: 70, y: 0, vel: 0, rotation: 0, flapFrame: 0 },
+  bird: { x: 70, y: 0, vel: 0, rotation: 0, flapFrame: 0, wingIndex: 0, wingTimer: 0 },
   gates: [],
   lives: MAX_LIVES,
   score: 0,
@@ -63,26 +55,24 @@ let state = {
   showingFeedback: false,
   feedbackTimer: 0,
   feedbackCorrect: false,
-  feedbackText: '',
   groundOffset: 0,
   correctStreak: 0,
-  // Damage effects
-  hurtTimer: 0,          // bird blink frames remaining
-  shakeTimer: 0,         // screen shake frames remaining
+  hurtTimer: 0,
+  shakeTimer: 0,
   shakeIntensity: 0,
   invincible: false,
   invincibleTimer: 0,
-  // Heart pickups
-  hearts: [],            // floating collectible hearts
-  // Phase 2
+  hearts: [],
+  fadeAlpha: 0,
+  fadeDirection: 0,
+  fadeCallback: null,
+  heartPulse: [0, 0, 0],
   p2Index: 0,
   p2Selected: -1,
   p2ShowResult: false,
   p2Timer: 0,
-  // Phase 3
   balance: 1000,
   p3TradeCount: 0,
-  // Qualify
   qualifyAnswers: {},
   frameCount: 0,
   lastTime: 0,
@@ -91,7 +81,7 @@ let state = {
 };
 
 function resetBird() {
-  state.bird = { x: 70, y: H * 0.4, vel: 0, rotation: 0, flapFrame: 0 };
+  state.bird = { x: 70, y: H * 0.4, vel: 0, rotation: 0, flapFrame: 0, wingIndex: 0, wingTimer: 0 };
 }
 
 function resetPhase1() {
@@ -108,249 +98,98 @@ function resetPhase1() {
   state.invincible = false;
   state.invincibleTimer = 0;
   state.hearts = [];
+  state.heartPulse = [0, 0, 0];
   resetBird();
   spawnGate();
+  startFadeIn();
 }
 
 // ============================================================
-// DRAWING HELPERS
+// PHASE TRANSITION FADES
 // ============================================================
-function drawText(text, x, y, size, color, align = 'center', stroke = true) {
-  ctx.font = `bold ${size}px Arial, sans-serif`;
-  ctx.textAlign = align;
-  ctx.textBaseline = 'middle';
-  if (stroke) {
-    ctx.strokeStyle = TEXT_SHADOW;
-    ctx.lineWidth = Math.max(size / 7, 2);
-    ctx.lineJoin = 'round';
-    ctx.strokeText(text, x, y);
-  }
-  ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
+function startFadeIn() {
+  state.fadeAlpha = 1;
+  state.fadeDirection = -1;
+  state.fadeCallback = null;
 }
 
-function drawRoundRect(x, y, w, h, r, fill, stroke) {
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, r);
-  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 3; ctx.stroke(); }
+function startFadeOut(callback) {
+  state.fadeAlpha = 0;
+  state.fadeDirection = 1;
+  state.fadeCallback = callback;
 }
 
-// ============================================================
-// DRAW BACKGROUND
-// ============================================================
-function drawBackground() {
-  // Sky gradient
-  const grad = ctx.createLinearGradient(0, 0, 0, H - GROUND_HEIGHT);
-  grad.addColorStop(0, SKY_TOP);
-  grad.addColorStop(1, '#87CEEB');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H - GROUND_HEIGHT);
-
-  // Clouds
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  const co = (state.frameCount * 0.3) % (W + 300);
-  for (let i = 0; i < 4; i++) {
-    const cx = ((i * 250 + 80) - co + W + 300) % (W + 300) - 100;
-    const cy = 50 + i * 45;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 28, 0, Math.PI * 2);
-    ctx.arc(cx + 22, cy - 10, 22, 0, Math.PI * 2);
-    ctx.arc(cx + 44, cy, 26, 0, Math.PI * 2);
-    ctx.arc(cx + 22, cy + 6, 20, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Ground
-  const gy = H - GROUND_HEIGHT;
-  ctx.fillStyle = GROUND_COLOR;
-  ctx.fillRect(0, gy, W, GROUND_HEIGHT);
-  ctx.fillStyle = GROUND_DARK;
-  ctx.fillRect(0, gy, W, 3);
-  const gOff = state.groundOffset % 24;
-  for (let x = -gOff; x < W + 24; x += 24) {
-    ctx.fillRect(x, gy + 10, 16, 3);
+function updateFade() {
+  if (state.fadeDirection === 0) return;
+  if (state.fadeDirection === 1) {
+    state.fadeAlpha = Math.min(1, state.fadeAlpha + 0.03);
+    if (state.fadeAlpha >= 1 && state.fadeCallback) {
+      state.fadeCallback();
+      state.fadeCallback = null;
+      state.fadeDirection = -1;
+    }
+  } else if (state.fadeDirection === -1) {
+    state.fadeAlpha = Math.max(0, state.fadeAlpha - 0.03);
+    if (state.fadeAlpha <= 0) state.fadeDirection = 0;
   }
 }
 
-// ============================================================
-// DRAW BIRD
-// ============================================================
-function drawBird() {
-  const { x, y, rotation, flapFrame } = state.bird;
-
-  // Blink effect when hurt — skip drawing every other frame
-  if (state.hurtTimer > 0 && Math.floor(state.hurtTimer / 3) % 2 === 0) {
-    return; // invisible frame = blink
-  }
-
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(rotation);
-
-  const wingY = Math.sin(flapFrame * 0.3) * 4;
-
-  // Shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.1)';
-  ctx.beginPath();
-  ctx.ellipse(2, 2, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Body — flash red when hurt
-  ctx.fillStyle = state.hurtTimer > 0 ? '#FF6B6B' : BIRD_YELLOW;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = BIRD_ORANGE;
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  // Wing
-  ctx.fillStyle = BIRD_ORANGE;
-  ctx.beginPath();
-  ctx.ellipse(-4, wingY + 2, 10, 6, -0.2, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Eye
-  ctx.fillStyle = '#fff';
-  ctx.beginPath();
-  ctx.arc(8, -5, 7, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.fillStyle = '#1a1a1a';
-  ctx.beginPath();
-  ctx.arc(10, -5, 3.5, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Beak
-  ctx.fillStyle = BIRD_RED;
-  ctx.beginPath();
-  ctx.moveTo(14, 0);
-  ctx.lineTo(24, 3);
-  ctx.lineTo(14, 6);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.restore();
+function drawFade() {
+  if (state.fadeAlpha <= 0) return;
+  ctx.fillStyle = `rgba(0,0,0,${state.fadeAlpha})`;
+  ctx.fillRect(0, 0, W, H);
 }
 
 // ============================================================
-// GATE DRAWING — Two passages with wall between
-// ============================================================
-// Gate structure:
-//   [solid top wall from 0 to topPassageY]
-//   [TOP PASSAGE: answer A label] height = PASSAGE_HEIGHT
-//   [MIDDLE WALL] height = WALL_THICKNESS
-//   [BOTTOM PASSAGE: answer B label] height = PASSAGE_HEIGHT
-//   [solid bottom wall to ground]
-
-function drawGate(gate) {
-  const { x, topPassageY, question, passed, result } = gate;
-  const capH = 8;
-  const capExtra = 10;
-
-  const topWallBottom = topPassageY;
-  const midWallTop = topPassageY + PASSAGE_HEIGHT;
-  const midWallBottom = midWallTop + WALL_THICKNESS;
-  const botPassageBottom = midWallBottom + PASSAGE_HEIGHT;
-  const groundY = H - GROUND_HEIGHT;
-
-  // === Top solid wall (from ceiling to top passage) ===
-  if (topWallBottom > 0) {
-    ctx.fillStyle = PIPE_GREEN;
-    ctx.fillRect(x, 0, GATE_WIDTH, topWallBottom);
-    ctx.strokeStyle = PIPE_BORDER;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, 0, GATE_WIDTH, topWallBottom);
-    // Highlight
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(x + 8, 0, 10, topWallBottom);
-    // Cap
-    ctx.fillStyle = PIPE_GREEN_DARK;
-    ctx.fillRect(x - capExtra / 2, topWallBottom - capH, GATE_WIDTH + capExtra, capH);
-    ctx.strokeStyle = PIPE_BORDER;
-    ctx.strokeRect(x - capExtra / 2, topWallBottom - capH, GATE_WIDTH + capExtra, capH);
-  }
-
-  // === Middle wall (between two passages) ===
-  ctx.fillStyle = PIPE_GREEN;
-  ctx.fillRect(x, midWallTop, GATE_WIDTH, WALL_THICKNESS);
-  ctx.strokeStyle = PIPE_BORDER;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x, midWallTop, GATE_WIDTH, WALL_THICKNESS);
-  // Caps on middle wall
-  ctx.fillStyle = PIPE_GREEN_DARK;
-  ctx.fillRect(x - capExtra / 2, midWallTop, GATE_WIDTH + capExtra, capH);
-  ctx.fillRect(x - capExtra / 2, midWallBottom - capH, GATE_WIDTH + capExtra, capH);
-  ctx.strokeRect(x - capExtra / 2, midWallTop, GATE_WIDTH + capExtra, capH);
-  ctx.strokeRect(x - capExtra / 2, midWallBottom - capH, GATE_WIDTH + capExtra, capH);
-
-  // === Bottom solid wall (from bottom passage to ground) ===
-  if (botPassageBottom < groundY) {
-    ctx.fillStyle = PIPE_GREEN;
-    ctx.fillRect(x, botPassageBottom, GATE_WIDTH, groundY - botPassageBottom);
-    ctx.strokeStyle = PIPE_BORDER;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, botPassageBottom, GATE_WIDTH, groundY - botPassageBottom);
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(x + 8, botPassageBottom, 10, groundY - botPassageBottom);
-    // Cap
-    ctx.fillStyle = PIPE_GREEN_DARK;
-    ctx.fillRect(x - capExtra / 2, botPassageBottom, GATE_WIDTH + capExtra, capH);
-    ctx.strokeRect(x - capExtra / 2, botPassageBottom, GATE_WIDTH + capExtra, capH);
-  }
-
-  // === Answer labels in passages ===
-  if (question && !passed) {
-    // Passage backgrounds (subtle tint)
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    ctx.fillRect(x, topPassageY, GATE_WIDTH, PASSAGE_HEIGHT);
-    ctx.fillRect(x, midWallBottom, GATE_WIDTH, PASSAGE_HEIGHT);
-
-    // Answer A (top passage)
-    const topCenter = topPassageY + PASSAGE_HEIGHT / 2;
-    drawText(question.a, x + GATE_WIDTH / 2, topCenter, 14, TEXT_WHITE);
-
-    // Answer B (bottom passage)
-    const botCenter = midWallBottom + PASSAGE_HEIGHT / 2;
-    drawText(question.b, x + GATE_WIDTH / 2, botCenter, 14, TEXT_WHITE);
-  }
-
-  // === Show result highlight after passing ===
-  if (result) {
-    const passageY = result.chose === 'a'
-      ? topPassageY
-      : midWallBottom;
-    const color = result.correct ? 'rgba(76,175,80,0.35)' : 'rgba(244,67,54,0.35)';
-    ctx.fillStyle = color;
-    ctx.fillRect(x, passageY, GATE_WIDTH, PASSAGE_HEIGHT);
-  }
-}
-
-// ============================================================
-// QUESTION BANNER
+// QUESTION DISPLAY (center + banner transition)
 // ============================================================
 function drawQuestionBanner() {
   const qi = state.questionIndex;
   const q = qi < phase1Questions.length ? phase1Questions[qi] : null;
   if (!q) return;
 
-  // Big visible banner at top
+  const nextGate = state.gates.find(g => !g.scored);
+  const gateDistance = nextGate ? nextGate.x - state.bird.x : 999;
+  const t = nextGate
+    ? Math.max(0, Math.min(1, (gateDistance - 120) / 130))
+    : 0;
+
+  // Top banner
   const bannerH = 65;
-  drawRoundRect(10, 8, W - 20, bannerH, 14, 'rgba(0,0,0,0.85)');
-
-  // Question number
-  drawText(`${qi + 1}/${phase1Questions.length}`, 40, 20, 11, '#aaa', 'center', false);
-
-  // Question text — big and bold
+  ctx.save();
+  ctx.globalAlpha = 1 - t * 0.3;
+  drawRoundRect(ctx, 10, 8, W - 20, bannerH, 14, 'rgba(0,0,0,0.85)');
+  drawText(ctx, `${qi + 1}/${phase1Questions.length}`, 40, 20, 11, '#aaa', 'center', false);
   const lines = q.q.split('\n');
   if (lines.length === 1) {
-    drawText(q.q, W / 2, 45, 18, '#F7DC6F');
+    drawText(ctx, q.q, W / 2, 45, 18, '#F7DC6F');
   } else {
-    drawText(lines[0], W / 2, 35, 16, '#F7DC6F');
-    drawText(lines[1], W / 2, 55, 16, '#F7DC6F');
+    drawText(ctx, lines[0], W / 2, 35, 16, '#F7DC6F');
+    drawText(ctx, lines[1], W / 2, 55, 16, '#F7DC6F');
+  }
+  ctx.restore();
+
+  // Center question when gates are far
+  if (t > 0.1) {
+    ctx.save();
+    ctx.globalAlpha = t * 0.9;
+    const centerY = H * 0.35;
+    const boxW = Math.min(W - 40, 340);
+    const boxH = lines.length > 1 ? 90 : 65;
+    drawRoundRect(ctx, W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 18, 'rgba(0,0,0,0.75)');
+    ctx.strokeStyle = 'rgba(247,220,111,0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 18);
+    ctx.stroke();
+    const fontSize = Math.min(24, W / 18);
+    if (lines.length === 1) {
+      drawText(ctx, q.q, W / 2, centerY, fontSize, '#F7DC6F');
+    } else {
+      drawText(ctx, lines[0], W / 2, centerY - 14, fontSize * 0.85, '#F7DC6F');
+      drawText(ctx, lines[1], W / 2, centerY + 14, fontSize * 0.85, '#F7DC6F');
+    }
+    ctx.restore();
   }
 }
 
@@ -358,15 +197,18 @@ function drawQuestionBanner() {
 // HUD
 // ============================================================
 function drawHUD() {
-  // Hearts
   for (let i = 0; i < MAX_LIVES; i++) {
-    const hx = 20 + i * 34;
-    ctx.font = '26px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText(i < state.lives ? '❤️' : '🤍', hx, 90);
+    const hx = 22 + i * 36;
+    const hy = 90;
+    const pulse = state.heartPulse[i] || 0;
+    const s = 1 + pulse * 0.3;
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.scale(s, s);
+    drawCanvasHeart(ctx, 0, 0, 12, i < state.lives ? '#E74C3C' : '#555', i < state.lives ? '#C0392B' : '#333');
+    ctx.restore();
   }
-  // Score
-  drawText(String(state.score), W - 50, 88, 32, TEXT_WHITE);
+  drawText(ctx, String(state.score), W - 50, 88, 34, TEXT_WHITE);
 }
 
 // ============================================================
@@ -380,135 +222,126 @@ function drawFeedback() {
 
 function drawFeedbackText() {
   if (!state.showingFeedback) return;
-  const text = state.feedbackCorrect ? '✅' : '❌';
-  drawText(text, W / 2, H / 2, 72, TEXT_WHITE);
+  drawText(ctx, state.feedbackCorrect ? '✅' : '❌', W / 2, H / 2, 72, TEXT_WHITE);
 }
 
 // ============================================================
 // GATE LOGIC
 // ============================================================
 function spawnGate() {
-  const q = state.questionIndex < phase1Questions.length
-    ? phase1Questions[state.questionIndex]
-    : null;
-
-  // Position the two passages vertically centered-ish, with some randomness
-  const totalHeight = PASSAGE_HEIGHT * 2 + WALL_THICKNESS;
+  const q = state.questionIndex < phase1Questions.length ? phase1Questions[state.questionIndex] : null;
+  const totalH = PASSAGE_HEIGHT * 2 + WALL_THICKNESS;
   const minTop = 80;
-  const maxTop = H - GROUND_HEIGHT - totalHeight - 40;
+  const maxTop = H - GROUND_HEIGHT - totalH - 40;
   const topPassageY = minTop + Math.random() * Math.max(maxTop - minTop, 0);
-
   const lastGate = state.gates[state.gates.length - 1];
   const startX = lastGate ? Math.max(W + 80, lastGate.x + GATE_SPACING) : W + 120;
-
-  state.gates.push({
-    x: startX,
-    topPassageY,
-    question: q,
-    passed: false,
-    scored: false,
-    result: null,
-  });
+  state.gates.push({ x: startX, topPassageY, question: q, passed: false, scored: false, result: null });
 }
 
 function checkGateCollision(gate) {
   const { x: bx, y: by } = state.bird;
   const r = BIRD_SIZE / 2 - 3;
-
-  // Not in gate x range
   if (bx + r < gate.x || bx - r > gate.x + GATE_WIDTH) return false;
-
-  const topWallBottom = gate.topPassageY;
   const midWallTop = gate.topPassageY + PASSAGE_HEIGHT;
   const midWallBottom = midWallTop + WALL_THICKNESS;
   const botPassageBottom = midWallBottom + PASSAGE_HEIGHT;
-
-  // Hit top wall
-  if (by - r < topWallBottom) return true;
-  // Hit middle wall
+  if (by - r < gate.topPassageY) return true;
   if (by + r > midWallTop && by - r < midWallBottom) return true;
-  // Hit bottom wall
   if (by + r > botPassageBottom) return true;
-
   return false;
+}
+
+function triggerDamage() {
+  state.hurtTimer = 40;
+  state.shakeTimer = 15;
+  state.shakeIntensity = 10;
+  state.invincible = true;
+  state.invincibleTimer = 50;
+  emitWrongParticles(state.bird.x, state.bird.y);
+  addFloatingText(state.bird.x + 30, state.bird.y - 20, '-❤️', '#F44336', 22);
+  if (state.lives >= 0 && state.lives < MAX_LIVES) {
+    state.heartPulse[state.lives] = 1;
+  }
 }
 
 function handleGatePass(gate) {
   if (gate.scored || !gate.question) return;
-  const bx = state.bird.x;
+  if (state.bird.x <= gate.x + GATE_WIDTH) return;
 
-  if (bx > gate.x + GATE_WIDTH && !gate.scored) {
-    gate.scored = true;
-    gate.passed = true;
+  gate.scored = true;
+  gate.passed = true;
+  const midWallCenter = gate.topPassageY + PASSAGE_HEIGHT + WALL_THICKNESS / 2;
+  const chose = state.bird.y < midWallCenter ? 'a' : 'b';
+  const correct = chose === gate.question.correct;
+  gate.result = { chose, correct };
 
-    // Determine which passage bird flew through
-    const midWallCenter = gate.topPassageY + PASSAGE_HEIGHT + WALL_THICKNESS / 2;
-    const chose = state.bird.y < midWallCenter ? 'a' : 'b';
-    const correct = chose === gate.question.correct;
+  if (gate.question.qualifying) {
+    state.qualifyAnswers[gate.question.q] = chose === 'a' ? gate.question.a : gate.question.b;
+  }
 
-    gate.result = { chose, correct };
-
-    // Store qualifying answers
-    if (gate.question.qualifying) {
-      const val = chose === 'a' ? gate.question.a : gate.question.b;
-      state.qualifyAnswers[gate.question.q] = val;
+  if (correct) {
+    state.score += 10;
+    state.feedbackCorrect = true;
+    state.correctStreak++;
+    state.flashColor = 'rgb(76,175,80)';
+    emitCorrectParticles(state.bird.x, state.bird.y);
+    addFloatingText(state.bird.x + 30, state.bird.y - 20, '+10', '#4CAF50', 24);
+  } else {
+    state.lives--;
+    state.feedbackCorrect = false;
+    state.correctStreak = 0;
+    state.flashColor = 'rgb(244,67,54)';
+    state.hurtTimer = 35;
+    state.shakeTimer = 12;
+    state.shakeIntensity = 8;
+    state.invincible = true;
+    state.invincibleTimer = 40;
+    emitWrongParticles(state.bird.x, state.bird.y);
+    addFloatingText(state.bird.x + 30, state.bird.y - 20, '-❤️', '#F44336', 22);
+    if (state.lives >= 0 && state.lives < MAX_LIVES) {
+      state.heartPulse[state.lives] = 1;
     }
+    if (state.lives <= 0) { showGameOver(); return; }
+  }
 
-    if (correct) {
-      state.score += 10;
-      state.feedbackCorrect = true;
-      state.correctStreak++;
-      state.flashColor = 'rgb(76,175,80)';
-    } else {
-      state.lives--;
-      state.feedbackCorrect = false;
-      state.correctStreak = 0;
-      state.flashColor = 'rgb(244,67,54)';
-      // Blink + shake on wrong answer
-      state.hurtTimer = 35;
-      state.shakeTimer = 12;
-      state.shakeIntensity = 8;
-      state.invincible = true;
-      state.invincibleTimer = 40;
-      if (state.lives <= 0) {
-        showGameOver();
-        return;
-      }
-    }
+  state.showingFeedback = true;
+  state.feedbackTimer = 30;
+  state.flashAlpha = 0.4;
+  state.questionIndex++;
 
-    state.showingFeedback = true;
-    state.feedbackTimer = 30;
-    state.flashAlpha = 0.4;
-    state.questionIndex++;
-
-    // Spawn heart pickup after every 2nd question
-    if (state.questionIndex % 2 === 0 && state.questionIndex < phase1Questions.length) {
-      const lastGate = state.gates[state.gates.length - 1];
-      if (lastGate) {
-        const hx = lastGate.x + GATE_SPACING / 2; // midway between gates
-        const groundY = H - GROUND_HEIGHT;
-        const hy = 100 + Math.random() * (groundY - 200);
-        state.hearts.push({ x: hx, y: hy, collected: false, seed: Math.random() * 100 });
-      }
+  if (state.questionIndex % 2 === 0 && state.questionIndex < phase1Questions.length) {
+    const lg = state.gates[state.gates.length - 1];
+    if (lg) {
+      const groundY = H - GROUND_HEIGHT;
+      state.hearts.push({ x: lg.x + GATE_SPACING / 2, y: 100 + Math.random() * (groundY - 200), collected: false, seed: Math.random() * 100 });
     }
   }
 }
 
 // ============================================================
-// PHASE 2: FINANCIAL QUIZ (fullscreen)
+// PHASE 2: FINANCIAL QUIZ
 // ============================================================
 function drawPhase2() {
-  ctx.fillStyle = '#0f0f2e';
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, '#0a0a2e');
+  bgGrad.addColorStop(1, '#1a1a4a');
+  ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = 'rgba(247,220,111,0.05)';
+  for (let i = 0; i < 8; i++) {
+    ctx.beginPath();
+    ctx.arc((state.frameCount * 0.5 + i * 137) % W, (state.frameCount * 0.3 + i * 89) % H, 2 + i % 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   const q = phase2Questions[state.p2Index];
   if (!q) { startPhase3(); return; }
 
-  drawText(`Pergunta ${state.p2Index + 1}/${phase2Questions.length}`, W / 2, 40, 16, '#888', 'center', false);
-  drawText('💰 QUIZ FINANCEIRO', W / 2, 80, 22, '#F7DC6F');
-
-  const lines = q.q.split('\n');
-  lines.forEach((line, i) => drawText(line, W / 2, 130 + i * 28, 18, TEXT_WHITE));
+  drawText(ctx, `Pergunta ${state.p2Index + 1}/${phase2Questions.length}`, W / 2, 40, 16, '#888', 'center', false);
+  drawText(ctx, '💰 QUIZ FINANCEIRO', W / 2, 80, 22, '#F7DC6F');
+  q.q.split('\n').forEach((line, i) => drawText(ctx, line, W / 2, 130 + i * 28, 18, TEXT_WHITE));
 
   const optY = 200;
   q.options.forEach((opt, i) => {
@@ -518,11 +351,10 @@ function drawPhase2() {
       if (i === q.correct) bg = CORRECT_COLOR;
       else if (i === state.p2Selected) bg = WRONG_COLOR;
     }
-    drawRoundRect(24, y, W - 48, 50, 12, bg, '#444');
-    drawText(opt, W / 2, y + 25, 15, TEXT_WHITE);
+    drawRoundRect(ctx, 24, y, W - 48, 50, 12, bg, '#555');
+    drawText(ctx, opt, W / 2, y + 25, 15, TEXT_WHITE);
   });
-
-  drawText(`Pontuação: ${state.score}`, W / 2, H - 35, 14, '#888', 'center', false);
+  drawText(ctx, `Pontuação: ${state.score}`, W / 2, H - 35, 14, '#888', 'center', false);
 }
 
 function handlePhase2Tap(tx, ty) {
@@ -534,7 +366,10 @@ function handlePhase2Tap(tx, ty) {
     if (tx > 24 && tx < W - 24 && ty > y && ty < y + 50) {
       state.p2Selected = i;
       state.p2ShowResult = true;
-      if (i === q.correct) state.score += 20;
+      if (i === q.correct) {
+        state.score += 20;
+        addFloatingText(W / 2, y + 25, '+20', '#4CAF50', 26);
+      }
       state.p2Timer = 45;
       return;
     }
@@ -551,100 +386,89 @@ function startPhase3() {
   state.gates = [];
   state.showingFeedback = false;
   resetBird();
+  startFadeIn();
 
-  // Generate trade gates
   for (let i = 0; i < phase3Scenarios.length; i++) {
     const totalH = PASSAGE_HEIGHT * 2 + WALL_THICKNESS;
     const minTop = 80;
     const maxTop = H - GROUND_HEIGHT - totalH - 40;
-    const topPassageY = minTop + Math.random() * Math.max(maxTop - minTop, 0);
     state.gates.push({
       x: W + 120 + i * GATE_SPACING,
-      topPassageY,
+      topPassageY: minTop + Math.random() * Math.max(maxTop - minTop, 0),
       scenario: phase3Scenarios[i],
       question: { a: '📈 BUY', b: '📉 SELL', correct: phase3Scenarios[i].direction === 'up' ? 'a' : 'b' },
-      passed: false,
-      scored: false,
-      result: null,
+      passed: false, scored: false, result: null,
     });
   }
 }
 
 function drawPhase3HUD() {
-  drawRoundRect(W / 2 - 75, 75, 150, 36, 10, 'rgba(0,0,0,0.6)');
-  const balColor = state.balance >= 1000 ? '#4CAF50' : '#F44336';
-  drawText(`$${state.balance.toLocaleString()}`, W / 2, 93, 18, balColor);
-
+  drawRoundRect(ctx, W / 2 - 75, 75, 150, 36, 10, 'rgba(0,0,0,0.6)');
+  drawText(ctx, `$${state.balance.toLocaleString()}`, W / 2, 93, 18, state.balance >= 1000 ? '#4CAF50' : '#F44336');
   const next = state.gates.find(g => !g.passed);
   if (next?.scenario) {
-    drawRoundRect(12, 12, W - 24, 50, 12, 'rgba(0,0,0,0.7)');
-    drawText(next.scenario.hint, W / 2, 30, 12, TEXT_WHITE);
-    drawText('⬆️ BUY (cima)  ⬇️ SELL (baixo)', W / 2, 48, 11, '#aaa');
+    drawRoundRect(ctx, 12, 12, W - 24, 50, 12, 'rgba(0,0,0,0.7)');
+    drawText(ctx, next.scenario.hint, W / 2, 30, 12, TEXT_WHITE);
+    drawText(ctx, '⬆️ BUY (cima)  ⬇️ SELL (baixo)', W / 2, 48, 11, '#aaa');
   }
 }
 
 function handleTradePass(gate) {
   if (gate.scored || !gate.scenario) return;
-  if (state.bird.x > gate.x + GATE_WIDTH) {
-    gate.scored = true;
-    gate.passed = true;
+  if (state.bird.x <= gate.x + GATE_WIDTH) return;
 
-    const midWallCenter = gate.topPassageY + PASSAGE_HEIGHT + WALL_THICKNESS / 2;
-    const chose = state.bird.y < midWallCenter ? 'a' : 'b';
-    const correct = (chose === 'a' && gate.scenario.direction === 'up') ||
-                    (chose === 'b' && gate.scenario.direction === 'down');
+  gate.scored = true;
+  gate.passed = true;
+  const midWallCenter = gate.topPassageY + PASSAGE_HEIGHT + WALL_THICKNESS / 2;
+  const chose = state.bird.y < midWallCenter ? 'a' : 'b';
+  const correct = (chose === 'a' && gate.scenario.direction === 'up') ||
+                  (chose === 'b' && gate.scenario.direction === 'down');
+  gate.result = { chose, correct };
 
-    gate.result = { chose, correct };
+  if (correct) {
+    const gain = 100 + Math.floor(Math.random() * 200);
+    state.balance += gain;
+    state.score += 15;
+    state.feedbackCorrect = true;
+    state.flashColor = 'rgb(76,175,80)';
+    emitCorrectParticles(state.bird.x, state.bird.y);
+    addFloatingText(state.bird.x + 30, state.bird.y - 20, `+$${gain}`, '#4CAF50', 22);
+  } else {
+    const loss = 50 + Math.floor(Math.random() * 100);
+    state.balance = Math.max(0, state.balance - loss);
+    state.feedbackCorrect = false;
+    state.flashColor = 'rgb(244,67,54)';
+    emitWrongParticles(state.bird.x, state.bird.y);
+    addFloatingText(state.bird.x + 30, state.bird.y - 20, `-$${loss}`, '#F44336', 22);
+  }
 
-    if (correct) {
-      const gain = 100 + Math.floor(Math.random() * 200);
-      state.balance += gain;
-      state.score += 15;
-      state.feedbackCorrect = true;
-      state.flashColor = 'rgb(76,175,80)';
-    } else {
-      const loss = 50 + Math.floor(Math.random() * 100);
-      state.balance = Math.max(0, state.balance - loss);
-      state.feedbackCorrect = false;
-      state.flashColor = 'rgb(244,67,54)';
-    }
+  state.showingFeedback = true;
+  state.feedbackTimer = 25;
+  state.flashAlpha = 0.3;
+  state.p3TradeCount++;
 
-    state.showingFeedback = true;
-    state.feedbackTimer = 25;
-    state.flashAlpha = 0.3;
-    state.p3TradeCount++;
-
-    if (state.p3TradeCount >= phase3Scenarios.length) {
-      setTimeout(() => { state.scene = 'leadform'; showLeadForm(); }, 1200);
-    }
+  if (state.p3TradeCount >= phase3Scenarios.length) {
+    setTimeout(() => startFadeOut(() => { state.scene = 'leadform'; showLeadForm(); }), 1200);
   }
 }
 
 // ============================================================
-// LEAD FORM
+// LEAD FORM / GAME OVER / SHARE
 // ============================================================
 function showLeadForm() {
-  const el = document.getElementById('lead-form');
   document.getElementById('form-balance').textContent = `Seu saldo: $${state.balance.toLocaleString()} 🤑`;
-  el.classList.remove('hidden');
+  document.getElementById('lead-form').classList.remove('hidden');
 }
 
 document.getElementById('capture-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const data = {
-    name: fd.get('name'), phone: fd.get('phone'), email: fd.get('email'),
-    score: state.score, balance: state.balance, phase: 3, answers: state.qualifyAnswers,
-  };
-  try {
-    await fetch('/api/leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-  } catch (err) { console.error(err); }
+  const data = { name: fd.get('name'), phone: fd.get('phone'), email: fd.get('email'), score: state.score, balance: state.balance, phase: 3, answers: state.qualifyAnswers };
+  try { await fetch('/api/leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); }
+  catch (err) { console.error('Lead submission failed:', err); }
   e.target.innerHTML = '<p style="font-size:24px;padding:20px;">✅ Enviado!<br><br>Entraremos em contato em breve!</p>';
 });
 
-// ============================================================
-// GAME OVER / SHARE
-// ============================================================
 function showGameOver() {
   state.scene = 'gameover';
   document.getElementById('share-score').textContent = `Pontuação: ${state.score} | Fase: ${state.questionIndex}`;
@@ -658,12 +482,8 @@ document.getElementById('btn-retry')?.addEventListener('click', () => {
 
 document.getElementById('btn-share')?.addEventListener('click', () => {
   const text = `🐦 Cheguei na fase ${state.questionIndex} no Flappy Quiz! Pontuação: ${state.score}. Aposto que você não consegue! 😏`;
-  if (navigator.share) {
-    navigator.share({ title: 'Flappy Quiz', text, url: location.href }).catch(() => {});
-  } else {
-    navigator.clipboard?.writeText(text + ' ' + location.href);
-    alert('Link copiado!');
-  }
+  if (navigator.share) { navigator.share({ title: 'Flappy Quiz', text, url: location.href }).catch(() => {}); }
+  else { navigator.clipboard?.writeText(text + ' ' + location.href); alert('Link copiado!'); }
 });
 
 // ============================================================
@@ -674,6 +494,8 @@ function handleTap(tx, ty) {
   if (state.scene === 'phase2') { handlePhase2Tap(tx, ty); return; }
   if (state.scene === 'phase1' || state.scene === 'phase3') {
     state.bird.vel = JUMP_FORCE;
+    state.bird.wingIndex = 0;
+    state.bird.wingTimer = 0;
   }
 }
 
@@ -686,20 +508,41 @@ document.addEventListener('keydown', (e) => {
 // MENU
 // ============================================================
 function drawMenu() {
-  drawBackground();
-  drawText('FLAPPY', W / 2, H * 0.22, 52, BIRD_YELLOW);
-  drawText('QUIZ', W / 2, H * 0.22 + 58, 52, TEXT_WHITE);
+  drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.frameCount * 0.5);
+  drawText(ctx, 'FLAPPY', W / 2, H * 0.22, 52, '#F7DC6F');
+  drawText(ctx, 'QUIZ', W / 2, H * 0.22 + 58, 52, TEXT_WHITE);
 
-  // Animated bird
+  // Bobbing bird
   const my = H * 0.46 + Math.sin(state.frameCount * 0.05) * 12;
-  const saved = { ...state.bird };
-  state.bird = { x: W / 2, y: my, vel: 0, rotation: 0, flapFrame: state.frameCount };
-  drawBird();
-  state.bird = saved;
+  const savedBird = { ...state.bird };
+  const savedHurt = state.hurtTimer;
+  state.hurtTimer = 0;
+  const menuBird = { x: W / 2, y: my, vel: 0, rotation: Math.sin(state.frameCount * 0.03) * 0.1, flapFrame: state.frameCount, wingIndex: Math.floor((state.frameCount * 0.15) % 3), wingTimer: 0 };
+  drawBird(ctx, menuBird, 0);
+  state.bird = savedBird;
+  state.hurtTimer = savedHurt;
 
-  drawRoundRect(W / 2 - 75, H * 0.6, 150, 52, 14, '#FF6B35');
-  drawText('▶ JOGAR', W / 2, H * 0.6 + 26, 22, TEXT_WHITE);
-  drawText('Toque para começar', W / 2, H * 0.75, 15, 'rgba(255,255,255,0.6)');
+  // Pulsing button
+  const btnPulse = 1 + Math.sin(state.frameCount * 0.06) * 0.04;
+  ctx.save();
+  const btnCY = H * 0.6 + 26;
+  ctx.translate(W / 2, btnCY);
+  ctx.scale(btnPulse, btnPulse);
+  ctx.translate(-W / 2, -btnCY);
+  const btnY = H * 0.6;
+  const btnGrad = ctx.createLinearGradient(0, btnY, 0, btnY + 52);
+  btnGrad.addColorStop(0, '#FF8A50');
+  btnGrad.addColorStop(1, '#FF5722');
+  drawRoundRect(ctx, W / 2 - 80, btnY, 160, 52, 16, btnGrad);
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(W / 2 - 80, btnY, 160, 52, 16);
+  ctx.stroke();
+  drawText(ctx, '▶ JOGAR', W / 2, btnY + 26, 24, TEXT_WHITE);
+  ctx.restore();
+
+  drawText(ctx, 'Toque para começar', W / 2, H * 0.75, 15, 'rgba(255,255,255,0.6)');
 }
 
 // ============================================================
@@ -707,48 +550,34 @@ function drawMenu() {
 // ============================================================
 function update() {
   state.frameCount++;
+  updateFade();
+  updateParticles();
+  updateFloatingTexts();
+
+  for (let i = 0; i < state.heartPulse.length; i++) {
+    if (state.heartPulse[i] > 0) state.heartPulse[i] = Math.max(0, state.heartPulse[i] - 0.04);
+  }
 
   if (state.scene === 'phase1' || state.scene === 'phase3') {
-    // Bird physics
     state.bird.vel += GRAVITY;
     state.bird.y += state.bird.vel;
     state.bird.rotation = Math.min(state.bird.vel * 0.06, Math.PI / 4);
     state.bird.flapFrame++;
     state.groundOffset += SCROLL_SPEED;
 
-    // Ground collision
-    if (state.bird.y > H - GROUND_HEIGHT - BIRD_SIZE / 2) {
-      state.bird.y = H - GROUND_HEIGHT - BIRD_SIZE / 2;
-      state.bird.vel = 0;
-    }
-    // Ceiling
-    if (state.bird.y < BIRD_SIZE / 2) {
-      state.bird.y = BIRD_SIZE / 2;
-      state.bird.vel = 0;
-    }
+    state.bird.wingTimer++;
+    if (state.bird.wingTimer > 5) { state.bird.wingTimer = 0; state.bird.wingIndex = (state.bird.wingIndex + 1) % 3; }
 
-    // Feedback timer
-    if (state.showingFeedback) {
-      state.feedbackTimer--;
-      if (state.feedbackTimer <= 0) state.showingFeedback = false;
-    }
-    // Flash fade
+    if (state.bird.y > H - GROUND_HEIGHT - BIRD_SIZE / 2) { state.bird.y = H - GROUND_HEIGHT - BIRD_SIZE / 2; state.bird.vel = 0; }
+    if (state.bird.y < BIRD_SIZE / 2) { state.bird.y = BIRD_SIZE / 2; state.bird.vel = 0; }
+
+    if (state.showingFeedback) { state.feedbackTimer--; if (state.feedbackTimer <= 0) state.showingFeedback = false; }
     if (state.flashAlpha > 0) state.flashAlpha -= 0.02;
-
-    // Hurt blink timer
     if (state.hurtTimer > 0) state.hurtTimer--;
-    // Screen shake timer
-    if (state.shakeTimer > 0) {
-      state.shakeTimer--;
-      state.shakeIntensity *= 0.92; // decay
-    }
-    // Invincibility timer
-    if (state.invincibleTimer > 0) {
-      state.invincibleTimer--;
-      if (state.invincibleTimer <= 0) state.invincible = false;
-    }
+    if (state.shakeTimer > 0) { state.shakeTimer--; state.shakeIntensity *= 0.92; }
+    if (state.invincibleTimer > 0) { state.invincibleTimer--; if (state.invincibleTimer <= 0) state.invincible = false; }
 
-    // Heart pickup collision
+    // Heart pickups
     for (const h of state.hearts) {
       if (h.collected) continue;
       h.x -= SCROLL_SPEED;
@@ -760,32 +589,24 @@ function update() {
           state.lives++;
           state.flashColor = 'rgb(255,105,180)';
           state.flashAlpha = 0.25;
+          emitHeartParticles(h.x, h.y);
+          addFloatingText(h.x, h.y - 20, '+❤️', '#FF69B4', 24);
+          state.heartPulse[state.lives - 1] = 1;
         }
       }
     }
     state.hearts = state.hearts.filter(h => !h.collected && h.x > -30);
 
-    // Move gates
     for (const g of state.gates) g.x -= SCROLL_SPEED;
     state.gates = state.gates.filter(g => g.x > -GATE_WIDTH - 30);
 
-    // Collision + scoring
     for (const g of state.gates) {
       if (!g.scored && !state.invincible && checkGateCollision(g)) {
-        // Hit a wall — lose life + effects
         state.lives--;
         state.flashAlpha = 0.5;
         state.flashColor = 'rgb(244,67,54)';
         state.bird.vel = JUMP_FORCE * 0.6;
-        // Blink effect
-        state.hurtTimer = 40;
-        // Screen shake
-        state.shakeTimer = 15;
-        state.shakeIntensity = 10;
-        // Brief invincibility so you don't die twice
-        state.invincible = true;
-        state.invincibleTimer = 50;
-
+        triggerDamage();
         g.scored = true;
         g.passed = true;
         state.questionIndex++;
@@ -793,37 +614,30 @@ function update() {
         if (state.lives <= 0) { showGameOver(); return; }
         break;
       }
-
       if (!g.scored) {
         if (state.scene === 'phase1') handleGatePass(g);
         else handleTradePass(g);
       }
     }
 
-    // Spawn next gate (phase 1)
     if (state.scene === 'phase1') {
       const last = state.gates[state.gates.length - 1];
       if (!last || last.x < W - GATE_SPACING) {
-        if (state.questionIndex < phase1Questions.length) {
-          spawnGate();
-        } else if (state.gates.every(g => g.passed || g.x < state.bird.x - 60)) {
-          state.scene = 'phase2';
-          state.p2Index = 0;
-          state.p2Selected = -1;
-          state.p2ShowResult = false;
+        if (state.questionIndex < phase1Questions.length) spawnGate();
+        else if (state.gates.every(g => g.passed || g.x < state.bird.x - 60)) {
+          startFadeOut(() => { state.scene = 'phase2'; state.p2Index = 0; state.p2Selected = -1; state.p2ShowResult = false; });
         }
       }
     }
   }
 
-  // Phase 2 timer
   if (state.scene === 'phase2' && state.p2ShowResult) {
     state.p2Timer--;
     if (state.p2Timer <= 0) {
       state.p2ShowResult = false;
       state.p2Selected = -1;
       state.p2Index++;
-      if (state.p2Index >= phase2Questions.length) startPhase3();
+      if (state.p2Index >= phase2Questions.length) startFadeOut(() => startPhase3());
     }
   }
 }
@@ -834,44 +648,37 @@ function update() {
 function render() {
   ctx.clearRect(0, 0, W, H);
 
-  if (state.scene === 'menu') { drawMenu(); return; }
-  if (state.scene === 'phase2') { drawPhase2(); return; }
+  if (state.scene === 'menu') { drawMenu(); drawFade(); return; }
+  if (state.scene === 'phase2') { drawPhase2(); drawFloatingTexts(ctx); drawFade(); return; }
 
   if (state.scene === 'phase1' || state.scene === 'phase3' || state.scene === 'leadform') {
-    // Screen shake
     if (state.shakeTimer > 0) {
-      const sx = (Math.random() - 0.5) * state.shakeIntensity;
-      const sy = (Math.random() - 0.5) * state.shakeIntensity;
       ctx.save();
-      ctx.translate(sx, sy);
+      ctx.translate((Math.random() - 0.5) * state.shakeIntensity, (Math.random() - 0.5) * state.shakeIntensity);
     }
 
-    drawBackground();
-    for (const g of state.gates) drawGate(g);
+    drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset);
+    for (const g of state.gates) drawGate(ctx, g, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
 
-    // Draw collectible hearts
     for (const h of state.hearts) {
       if (!h.collected) {
-        // Smooth gentle bob using fixed seed per heart, not position
         const bobY = Math.sin(state.frameCount * 0.04 + h.seed) * 5;
-        const pulseScale = 1 + Math.sin(state.frameCount * 0.06 + h.seed) * 0.08;
+        const ps = 1 + Math.sin(state.frameCount * 0.06 + h.seed) * 0.08;
         ctx.save();
         ctx.translate(h.x, h.y + bobY);
-        ctx.scale(pulseScale, pulseScale);
-        ctx.font = `${HEART_SIZE}px Arial`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('❤️', 0, 0);
-        // Soft glow
-        ctx.fillStyle = 'rgba(255,80,80,0.12)';
+        ctx.scale(ps, ps);
+        ctx.fillStyle = 'rgba(255,80,80,0.15)';
         ctx.beginPath();
-        ctx.arc(0, 0, HEART_SIZE * 0.8, 0, Math.PI * 2);
+        ctx.arc(0, 0, HEART_SIZE, 0, Math.PI * 2);
         ctx.fill();
+        drawCanvasHeart(ctx, 0, 0, HEART_SIZE * 0.6, '#FF4081', '#C2185B');
         ctx.restore();
       }
     }
 
-    drawBird();
+    drawBird(ctx, state.bird, state.hurtTimer);
+    drawParticles(ctx);
+    drawFloatingTexts(ctx);
     drawHUD();
 
     if (state.scene === 'phase1') drawQuestionBanner();
@@ -880,17 +687,15 @@ function render() {
     drawFeedbackText();
     drawFeedback();
 
-    if (state.shakeTimer > 0) {
-      ctx.restore();
-    }
+    if (state.shakeTimer > 0) ctx.restore();
   }
+
+  drawFade();
 }
 
 function gameLoop(ts) {
   state.lastTime = ts;
-  if (state.scene !== 'gameover' && state.scene !== 'leadform') {
-    update();
-  }
+  if (state.scene !== 'gameover' && state.scene !== 'leadform') update();
   render();
   requestAnimationFrame(gameLoop);
 }
