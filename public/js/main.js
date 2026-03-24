@@ -4,6 +4,12 @@ import { emitCorrectParticles, emitWrongParticles, emitHeartParticles, emitCombo
 import { addFloatingText, updateFloatingTexts, drawFloatingTexts } from './floatingText.js';
 import { drawText, drawRoundRect, drawBird, drawGate, drawCanvasHeart, updateTrail, clearTrail, drawBirdTrail } from './drawing.js';
 import { playFlap, playCorrect, playWrong, playHeartPickup, playGameOver, playPhaseUnlock, playCoin, playCombo } from './sounds.js';
+import { createCountdownState, startCountdown, updateCountdown, drawCountdown } from './countdown.js';
+import { createTutorialState, showTutorial, dismissTutorial, updateTutorial, drawTutorial } from './tutorial.js';
+import { drawProgressBar } from './progressBar.js';
+import { getHighScore, saveHighScore } from './leaderboard.js';
+import { shareWithImage } from './shareCard.js';
+import { createBalanceAnimState, updateBalanceAnim, drawAnimatedBalance } from './balanceAnim.js';
 
 // ============================================================
 // CONFIG
@@ -93,6 +99,14 @@ let state = {
   dyingTimer: 0,
   transitionText: '',
   transitionTimer: 0,
+  // Feature 1: Countdown
+  countdown: createCountdownState(),
+  // Feature 2: Tutorial
+  tutorial: createTutorialState(),
+  // Feature 5: Continue
+  continuesUsed: 0,
+  // Feature 7: Balance animation
+  balanceAnim: createBalanceAnimState(),
 };
 
 function getCurrentPhase() {
@@ -106,7 +120,7 @@ function resetBird() {
 }
 
 function resetPhase1() {
-  state.scene = 'phase1';
+  state.scene = 'countdown';
   state.gates = [];
   state.lives = MAX_LIVES;
   state.score = 0;
@@ -121,10 +135,36 @@ function resetPhase1() {
   state.hearts = [];
   state.coins = [];
   state.heartPulse = [0, 0, 0];
+  state.continuesUsed = 0;
   clearTrail();
   resetBird();
   spawnGate();
   startFadeIn();
+  // Feature 1: Start countdown
+  state.countdown = startCountdown(state.countdown);
+}
+
+// Feature 5: Continue from checkpoint
+function continueFromCheckpoint() {
+  state.scene = 'countdown';
+  state.gates = [];
+  state.lives = 2; // Penalty: 2 lives instead of 3
+  state.showingFeedback = false;
+  state.correctStreak = 0;
+  state.hurtTimer = 0;
+  state.shakeTimer = 0;
+  state.invincible = false;
+  state.invincibleTimer = 0;
+  state.hearts = [];
+  state.coins = [];
+  state.heartPulse = [0, 0, 0];
+  state.continuesUsed++;
+  clearTrail();
+  resetBird();
+  // questionIndex is NOT reset -- continue from where died
+  spawnGate();
+  startFadeIn();
+  state.countdown = startCountdown(state.countdown);
 }
 
 // ============================================================
@@ -509,6 +549,8 @@ function startPhase3() {
   state.gates = [];
   state.coins = [];
   state.showingFeedback = false;
+  // Feature 7: Reset balance animation
+  state.balanceAnim = { ...createBalanceAnimState() };
   clearTrail();
   resetBird();
   startFadeIn();
@@ -528,8 +570,8 @@ function startPhase3() {
 }
 
 function drawPhase3HUD() {
-  drawRoundRect(ctx, W / 2 - 75, 75, 150, 36, 10, 'rgba(0,0,0,0.6)');
-  drawText(ctx, `$${state.balance.toLocaleString()}`, W / 2, 93, 18, state.balance >= 1000 ? '#4CAF50' : '#F44336');
+  // Feature 7: Animated balance display
+  drawAnimatedBalance(ctx, state.balanceAnim, W);
   const next = state.gates.find(g => !g.passed);
   if (next?.scenario) {
     drawRoundRect(ctx, 12, 12, W - 24, 50, 12, 'rgba(0,0,0,0.7)');
@@ -604,7 +646,36 @@ function startDying() {
 
 function showGameOver() {
   state.scene = 'gameover';
-  document.getElementById('share-score').textContent = `Pontuação: ${state.score} | Fase: ${state.questionIndex}`;
+
+  // Feature 4: Leaderboard -- check and save high score
+  const isNewRecord = saveHighScore(state.score);
+  const highScore = getHighScore();
+
+  document.getElementById('share-score').textContent = `Pontua\u00e7\u00e3o: ${state.score} | Fase: ${state.questionIndex}`;
+
+  const highscoreEl = document.getElementById('share-highscore');
+  if (highscoreEl) highscoreEl.textContent = `Seu recorde: ${highScore} pts`;
+
+  const newRecordEl = document.getElementById('share-new-record');
+  if (newRecordEl) {
+    if (isNewRecord && state.score > 0) {
+      newRecordEl.textContent = '\uD83C\uDFC6 NOVO RECORDE!';
+      newRecordEl.classList.remove('hidden');
+    } else {
+      newRecordEl.classList.add('hidden');
+    }
+  }
+
+  // Feature 5: Show continue button only if not used yet and still in phase1
+  const continueBtn = document.getElementById('btn-continue');
+  if (continueBtn) {
+    if (state.continuesUsed === 0 && state.questionIndex > 0 && state.questionIndex < phase1Questions.length) {
+      continueBtn.classList.remove('hidden');
+    } else {
+      continueBtn.classList.add('hidden');
+    }
+  }
+
   document.getElementById('share-overlay').classList.remove('hidden');
 }
 
@@ -613,10 +684,17 @@ document.getElementById('btn-retry')?.addEventListener('click', () => {
   resetPhase1();
 });
 
+// Feature 5: Continue button
+document.getElementById('btn-continue')?.addEventListener('click', () => {
+  document.getElementById('share-overlay').classList.add('hidden');
+  continueFromCheckpoint();
+});
+
+// Feature 6: Viral share card
 document.getElementById('btn-share')?.addEventListener('click', () => {
-  const text = `🐦 Cheguei na fase ${state.questionIndex} no Flappy Quiz! Pontuação: ${state.score}. Aposto que você não consegue! 😏`;
-  if (navigator.share) { navigator.share({ title: 'Flappy Quiz', text, url: location.href }).catch(() => {}); }
-  else { navigator.clipboard?.writeText(text + ' ' + location.href); alert('Link copiado!'); }
+  const phaseNum = state.scene === 'phase3' ? 3 : state.questionIndex >= phase1Questions.length ? 2 : 1;
+  const highScore = getHighScore();
+  shareWithImage(state.score, phaseNum, state.lives, MAX_LIVES, highScore);
 });
 
 // ============================================================
@@ -624,9 +702,15 @@ document.getElementById('btn-share')?.addEventListener('click', () => {
 // ============================================================
 function handleTap(tx, ty) {
   if (state.scene === 'menu') { resetPhase1(); return; }
+  // Feature 1: During countdown, ignore taps
+  if (state.scene === 'countdown') return;
   if (state.scene === 'dying' || state.scene === 'transition') return;
   if (state.scene === 'phase2') { handlePhase2Tap(tx, ty); return; }
   if (state.scene === 'phase1' || state.scene === 'phase3') {
+    // Feature 2: Dismiss tutorial on first tap
+    if (state.tutorial.visible) {
+      state.tutorial = dismissTutorial(state.tutorial);
+    }
     state.bird.vel = JUMP_FORCE;
     state.bird.wingIndex = 0;
     state.bird.wingTimer = 0;
@@ -677,7 +761,13 @@ function drawMenu() {
   drawText(ctx, '▶ JOGAR', W / 2, btnY + 26, 24, TEXT_WHITE);
   ctx.restore();
 
-  drawText(ctx, 'Toque para começar', W / 2, H * 0.75, 15, 'rgba(255,255,255,0.6)');
+  drawText(ctx, 'Toque para come\u00e7ar', W / 2, H * 0.75, 15, 'rgba(255,255,255,0.6)');
+
+  // Feature 4: Show high score on menu
+  const highScore = getHighScore();
+  if (highScore > 0) {
+    drawText(ctx, `Recorde: ${highScore}`, W / 2, H * 0.68, 16, 'rgba(255,255,255,0.5)', 'center', false);
+  }
 }
 
 // ============================================================
@@ -693,7 +783,30 @@ function update() {
     if (state.heartPulse[i] > 0) state.heartPulse[i] = Math.max(0, state.heartPulse[i] - 0.04);
   }
 
+  // Feature 1: Countdown update
+  if (state.scene === 'countdown') {
+    state.countdown = updateCountdown(state.countdown);
+    // Bird hovers in place -- no gravity
+    state.bird.wingTimer++;
+    if (state.bird.wingTimer > 5) { state.bird.wingTimer = 0; state.bird.wingIndex = (state.bird.wingIndex + 1) % 3; }
+    state.bird.flapFrame++;
+    // Gentle bob
+    state.bird.y = H * 0.4 + Math.sin(state.frameCount * 0.05) * 6;
+    state.bird.rotation = 0;
+    state.groundOffset += SCROLL_SPEED * 0.3;
+    if (!state.countdown.active) {
+      // Countdown finished -- start actual gameplay
+      state.scene = 'phase1';
+      // Feature 2: Show tutorial on first game
+      state.tutorial = showTutorial(state.tutorial);
+    }
+    return;
+  }
+
   if (state.scene === 'phase1' || state.scene === 'phase3') {
+    // Feature 2: Update tutorial
+    state.tutorial = updateTutorial(state.tutorial);
+
     state.bird.vel += GRAVITY;
     state.bird.y += state.bird.vel;
     state.bird.rotation = Math.min(state.bird.vel * 0.06, Math.PI / 4);
@@ -711,6 +824,11 @@ function update() {
     if (state.hurtTimer > 0) state.hurtTimer--;
     if (state.shakeTimer > 0) { state.shakeTimer--; state.shakeIntensity *= 0.92; }
     if (state.invincibleTimer > 0) { state.invincibleTimer--; if (state.invincibleTimer <= 0) state.invincible = false; }
+
+    // Feature 7: Update balance animation in phase3
+    if (state.scene === 'phase3') {
+      state.balanceAnim = updateBalanceAnim(state.balanceAnim, state.balance);
+    }
 
     // Heart pickups
     for (const h of state.hearts) {
@@ -862,6 +980,21 @@ function render() {
   if (state.scene === 'menu') { drawMenu(); drawFade(); return; }
   if (state.scene === 'phase2') { drawPhase2(); drawFloatingTexts(ctx); drawFade(); return; }
 
+  // Feature 1: Countdown scene rendering
+  if (state.scene === 'countdown') {
+    drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset, getCurrentPhase());
+    for (const g of state.gates) {
+      const resolvedGate = { ...g, question: getGateQuestion(g) };
+      drawGate(ctx, resolvedGate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
+    }
+    drawBird(ctx, state.bird, state.hurtTimer, H - GROUND_HEIGHT, getCurrentPhase());
+    drawHUD();
+    drawQuestionBanner();
+    drawCountdown(ctx, state.countdown, W, H);
+    drawFade();
+    return;
+  }
+
   // Transition screen
   if (state.scene === 'transition') {
     ctx.fillStyle = '#0a0a2e';
@@ -967,11 +1100,24 @@ function render() {
       }
     }
 
-    if (state.scene === 'phase1') drawQuestionBanner();
-    if (state.scene === 'phase3') drawPhase3HUD();
+    if (state.scene === 'phase1') {
+      drawQuestionBanner();
+      // Feature 3: Progress bar
+      drawProgressBar(ctx, W, state.questionIndex, phase1Questions.length);
+    }
+    if (state.scene === 'phase3') {
+      drawPhase3HUD();
+      // Feature 3: Progress bar for phase 3
+      drawProgressBar(ctx, W, state.p3TradeCount, phase3Scenarios.length);
+    }
 
     drawFeedbackText();
     drawFeedback();
+
+    // Feature 2: Tutorial overlay (drawn on top)
+    if (state.scene === 'phase1') {
+      drawTutorial(ctx, state.tutorial, W, H);
+    }
 
     if (state.shakeTimer > 0) ctx.restore();
   }
@@ -985,5 +1131,6 @@ function gameLoop(ts) {
   render();
   requestAnimationFrame(gameLoop);
 }
+
 
 requestAnimationFrame(gameLoop);
