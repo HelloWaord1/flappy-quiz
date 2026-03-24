@@ -1,211 +1,214 @@
 // ============================================================
-// PARALLAX BACKGROUND SYSTEM
+// PARALLAX BACKGROUND — Flappy Bird style
 // ============================================================
-
-// Pre-generate mountain/city/tree shapes once
-let mountainPoints = null;
-let treePositions = null;
-let bushPositions = null;
-
-function ensureShapes(W) {
-  if (!mountainPoints || mountainPoints.width !== W) {
-    // Mountains - jagged silhouette
-    const pts = [];
-    let x = 0;
-    while (x < W + 100) {
-      pts.push({ x, h: 40 + Math.random() * 80 });
-      x += 30 + Math.random() * 50;
-    }
-    mountainPoints = { points: pts, width: W };
-  }
-  if (!treePositions || treePositions.width !== W) {
-    const trees = [];
-    for (let i = 0; i < Math.ceil(W / 60) + 4; i++) {
-      trees.push({
-        x: i * 60 + Math.random() * 20,
-        h: 30 + Math.random() * 25,
-        w: 18 + Math.random() * 10,
-      });
-    }
-    treePositions = { trees, width: W };
-  }
-  if (!bushPositions || bushPositions.width !== W) {
-    const bushes = [];
-    for (let i = 0; i < Math.ceil(W / 45) + 4; i++) {
-      bushes.push({
-        x: i * 45 + Math.random() * 15,
-        r: 10 + Math.random() * 8,
-      });
-    }
-    bushPositions = { bushes, width: W };
-  }
-}
+// 3 layers: sky+clouds → soft hills → trees+bushes → ground
 
 export function drawParallaxBackground(ctx, W, H, groundHeight, groundOffset) {
   const groundY = H - groundHeight;
-  ensureShapes(W);
 
-  // === Layer 0: Sky gradient ===
+  // === Sky gradient ===
   const skyGrad = ctx.createLinearGradient(0, 0, 0, groundY);
-  skyGrad.addColorStop(0, '#3AADBE');
-  skyGrad.addColorStop(0.5, '#6CC8D6');
+  skyGrad.addColorStop(0, '#4EC0CA');
+  skyGrad.addColorStop(0.6, '#87CEEB');
   skyGrad.addColorStop(1, '#B0E0E6');
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, W, groundY);
 
-  // === Clouds (0.3x speed) ===
-  const cloudOffset = groundOffset * 0.3;
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  for (let i = 0; i < 5; i++) {
-    const cx = ((i * 220 + 80) - (cloudOffset % (W + 400)) + W + 400) % (W + 400) - 120;
-    const cy = 30 + i * 38 + Math.sin(i * 2.3) * 15;
-    drawCloud(ctx, cx, cy, 0.7 + (i % 3) * 0.2);
-  }
+  // === Clouds (very slow) ===
+  drawClouds(ctx, W, groundOffset * 0.15);
 
-  // === Layer 1: Far mountains (0.3x speed) ===
-  const mtOffset = groundOffset * 0.3;
-  drawMountains(ctx, W, groundY, mtOffset, 'rgba(100,140,160,0.5)', 'rgba(80,120,140,0.4)');
+  // === Far hills (0.2x speed) — soft rounded ===
+  drawHills(ctx, W, groundY, groundOffset * 0.2, {
+    color1: 'rgba(120,160,130,0.4)',
+    color2: 'rgba(100,145,115,0.25)',
+    baseHeight: 60,
+    amplitude: 35,
+    frequency: 0.004,
+    yOffset: 0,
+  });
 
-  // === Layer 2: Mid trees/bushes (0.6x speed) ===
-  const treeOffset = groundOffset * 0.6;
-  drawTrees(ctx, W, groundY, treeOffset);
-  drawBushes(ctx, W, groundY, treeOffset);
+  // === Near hills (0.4x speed) — slightly darker ===
+  drawHills(ctx, W, groundY, groundOffset * 0.4, {
+    color1: 'rgba(80,130,80,0.45)',
+    color2: 'rgba(60,110,60,0.3)',
+    baseHeight: 40,
+    amplitude: 25,
+    frequency: 0.006,
+    yOffset: 10,
+  });
 
-  // === Layer 3: Ground (1x speed) ===
+  // === Trees (0.55x speed) ===
+  drawTreeRow(ctx, W, groundY, groundOffset * 0.55);
+
+  // === Bushes (0.7x speed) ===
+  drawBushRow(ctx, W, groundY, groundOffset * 0.7);
+
+  // === Ground ===
   drawGround(ctx, W, H, groundHeight, groundOffset);
 }
 
-function drawCloud(ctx, x, y, scale) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(scale, scale);
-  ctx.beginPath();
-  ctx.arc(0, 0, 25, 0, Math.PI * 2);
-  ctx.arc(22, -8, 20, 0, Math.PI * 2);
-  ctx.arc(44, 0, 23, 0, Math.PI * 2);
-  ctx.arc(18, 8, 18, 0, Math.PI * 2);
-  ctx.arc(32, 6, 16, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+// ============================================================
+// CLOUDS — soft, fluffy
+// ============================================================
+function drawClouds(ctx, W, offset) {
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  const clouds = [
+    { baseX: 100, y: 45, s: 0.9 },
+    { baseX: 350, y: 70, s: 0.7 },
+    { baseX: 550, y: 35, s: 1.0 },
+    { baseX: 800, y: 80, s: 0.6 },
+    { baseX: 1050, y: 50, s: 0.85 },
+  ];
+  const loopW = 1200;
+  for (const c of clouds) {
+    const cx = ((c.baseX - offset % loopW) + loopW) % loopW - 80;
+    if (cx < -100 || cx > W + 100) continue;
+    ctx.save();
+    ctx.translate(cx, c.y);
+    ctx.scale(c.s, c.s);
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.arc(20, -8, 20, 0, Math.PI * 2);
+    ctx.arc(42, -2, 22, 0, Math.PI * 2);
+    ctx.arc(16, 7, 17, 0, Math.PI * 2);
+    ctx.arc(34, 5, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
-function drawMountains(ctx, W, groundY, offset, fillColor, fillColor2) {
-  const pts = mountainPoints.points;
-  const totalW = pts[pts.length - 1].x;
+// ============================================================
+// HILLS — smooth sine-based rolling hills
+// ============================================================
+function drawHills(ctx, W, groundY, offset, opts) {
+  const { color1, color2, baseHeight, amplitude, frequency, yOffset } = opts;
 
-  // Far range
   ctx.beginPath();
-  ctx.moveTo(0, groundY);
-  for (const p of pts) {
-    const px = ((p.x - offset % totalW) + totalW) % totalW;
-    ctx.lineTo(px, groundY - p.h - 30);
+  ctx.moveTo(0, groundY + yOffset);
+
+  // Draw smooth curve using sine waves
+  for (let x = 0; x <= W; x += 3) {
+    const worldX = x + offset;
+    const h = baseHeight
+      + Math.sin(worldX * frequency) * amplitude
+      + Math.sin(worldX * frequency * 2.3 + 1.5) * amplitude * 0.4
+      + Math.sin(worldX * frequency * 0.7 + 3.0) * amplitude * 0.6;
+    ctx.lineTo(x, groundY - h + yOffset);
   }
-  ctx.lineTo(W, groundY);
+
+  ctx.lineTo(W, groundY + yOffset + 10);
+  ctx.lineTo(0, groundY + yOffset + 10);
   ctx.closePath();
-  const grad = ctx.createLinearGradient(0, groundY - 120, 0, groundY);
-  grad.addColorStop(0, fillColor);
-  grad.addColorStop(1, fillColor2);
+
+  const grad = ctx.createLinearGradient(0, groundY - baseHeight - amplitude, 0, groundY + yOffset);
+  grad.addColorStop(0, color1);
+  grad.addColorStop(1, color2);
   ctx.fillStyle = grad;
   ctx.fill();
-
-  // Near range (slightly different offset)
-  ctx.beginPath();
-  ctx.moveTo(0, groundY);
-  for (const p of pts) {
-    const px = ((p.x - (offset * 1.3) % totalW) + totalW) % totalW;
-    ctx.lineTo(px, groundY - p.h * 0.7);
-  }
-  ctx.lineTo(W, groundY);
-  ctx.closePath();
-  const grad2 = ctx.createLinearGradient(0, groundY - 80, 0, groundY);
-  grad2.addColorStop(0, 'rgba(70,110,70,0.45)');
-  grad2.addColorStop(1, 'rgba(60,100,60,0.3)');
-  ctx.fillStyle = grad2;
-  ctx.fill();
 }
 
-function drawTrees(ctx, W, groundY, offset) {
-  const trees = treePositions.trees;
-  const totalW = (trees.length) * 60 + 20;
+// ============================================================
+// TREES — simple ellipse canopy on trunk
+// ============================================================
+function drawTreeRow(ctx, W, groundY, offset) {
+  const spacing = 55;
+  const loopW = spacing * 25;
+  const off = offset % loopW;
 
-  for (const t of trees) {
-    const tx = ((t.x - offset % totalW) + totalW) % totalW;
+  for (let i = 0; i < Math.ceil(W / spacing) + 3; i++) {
+    const baseX = i * spacing;
+    const tx = baseX - (off % spacing);
     if (tx < -30 || tx > W + 30) continue;
 
+    // Deterministic "random" per tree slot
+    const seed = ((Math.floor((baseX + off) / spacing) * 7919) % 1000) / 1000;
+    const h = 28 + seed * 20;
+    const canopyW = 12 + seed * 8;
+
     // Trunk
-    ctx.fillStyle = '#5D4037';
-    ctx.fillRect(tx - 3, groundY - t.h * 0.4, 6, t.h * 0.4);
+    ctx.fillStyle = '#6D4C41';
+    ctx.fillRect(tx - 2.5, groundY - h * 0.35, 5, h * 0.35);
 
-    // Canopy gradient
-    const canopyGrad = ctx.createRadialGradient(tx, groundY - t.h * 0.6, 2, tx, groundY - t.h * 0.5, t.w);
-    canopyGrad.addColorStop(0, '#66BB6A');
-    canopyGrad.addColorStop(1, '#388E3C');
-    ctx.fillStyle = canopyGrad;
-
+    // Canopy
+    const cGrad = ctx.createRadialGradient(tx, groundY - h * 0.55, 2, tx, groundY - h * 0.5, canopyW);
+    cGrad.addColorStop(0, '#66BB6A');
+    cGrad.addColorStop(1, '#2E7D32');
+    ctx.fillStyle = cGrad;
     ctx.beginPath();
-    ctx.ellipse(tx, groundY - t.h * 0.6, t.w * 0.6, t.h * 0.45, 0, 0, Math.PI * 2);
+    ctx.ellipse(tx, groundY - h * 0.55, canopyW, h * 0.4, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 }
 
-function drawBushes(ctx, W, groundY, offset) {
-  const bushes = bushPositions.bushes;
-  const totalW = (bushes.length) * 45 + 15;
+// ============================================================
+// BUSHES — small green ellipses near ground
+// ============================================================
+function drawBushRow(ctx, W, groundY, offset) {
+  const spacing = 40;
+  const loopW = spacing * 30;
+  const off = offset % loopW;
 
-  for (const b of bushes) {
-    const bx = ((b.x - offset % totalW) + totalW) % totalW;
+  for (let i = 0; i < Math.ceil(W / spacing) + 3; i++) {
+    const baseX = i * spacing + 15;
+    const bx = baseX - (off % spacing);
     if (bx < -20 || bx > W + 20) continue;
 
-    const bushGrad = ctx.createRadialGradient(bx, groundY - b.r * 0.3, 1, bx, groundY - b.r * 0.2, b.r);
-    bushGrad.addColorStop(0, '#7CB342');
-    bushGrad.addColorStop(1, '#558B2F');
-    ctx.fillStyle = bushGrad;
+    const seed = ((Math.floor((baseX + off) / spacing) * 6271) % 1000) / 1000;
+    const r = 8 + seed * 7;
+
+    const bGrad = ctx.createRadialGradient(bx, groundY - r * 0.25, 1, bx, groundY - r * 0.2, r);
+    bGrad.addColorStop(0, '#7CB342');
+    bGrad.addColorStop(1, '#33691E');
+    ctx.fillStyle = bGrad;
     ctx.beginPath();
-    ctx.ellipse(bx, groundY - b.r * 0.3, b.r, b.r * 0.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(bx, groundY - r * 0.25, r, r * 0.55, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 }
 
+// ============================================================
+// GROUND — textured with grass blades
+// ============================================================
 function drawGround(ctx, W, H, groundHeight, offset) {
   const gy = H - groundHeight;
 
-  // Main ground gradient
-  const groundGrad = ctx.createLinearGradient(0, gy, 0, H);
-  groundGrad.addColorStop(0, '#C8A951');
-  groundGrad.addColorStop(0.3, '#DED895');
-  groundGrad.addColorStop(1, '#B89A3D');
-  ctx.fillStyle = groundGrad;
+  // Main fill
+  const gGrad = ctx.createLinearGradient(0, gy, 0, H);
+  gGrad.addColorStop(0, '#C8A951');
+  gGrad.addColorStop(0.3, '#DED895');
+  gGrad.addColorStop(1, '#B89A3D');
+  ctx.fillStyle = gGrad;
   ctx.fillRect(0, gy, W, groundHeight);
 
-  // Grass on top — green strip
-  const grassGrad = ctx.createLinearGradient(0, gy - 4, 0, gy + 10);
+  // Grass strip
+  const grassGrad = ctx.createLinearGradient(0, gy - 3, 0, gy + 8);
   grassGrad.addColorStop(0, '#4CAF50');
   grassGrad.addColorStop(0.5, '#388E3C');
   grassGrad.addColorStop(1, '#C8A951');
   ctx.fillStyle = grassGrad;
-  ctx.fillRect(0, gy - 2, W, 12);
+  ctx.fillRect(0, gy - 2, W, 10);
 
   // Grass blades
   ctx.fillStyle = '#43A047';
-  const gOff = offset % 16;
-  for (let x = -gOff; x < W + 16; x += 16) {
+  const gOff = offset % 14;
+  for (let x = -gOff; x < W + 14; x += 14) {
     ctx.beginPath();
     ctx.moveTo(x, gy - 2);
-    ctx.lineTo(x + 3, gy - 8);
+    ctx.lineTo(x + 3, gy - 7);
     ctx.lineTo(x + 6, gy - 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(x + 8, gy - 2);
-    ctx.lineTo(x + 11, gy - 6);
-    ctx.lineTo(x + 14, gy - 2);
+    ctx.moveTo(x + 7, gy - 2);
+    ctx.lineTo(x + 10, gy - 5);
+    ctx.lineTo(x + 13, gy - 2);
     ctx.fill();
   }
 
-  // Ground texture lines
-  ctx.fillStyle = 'rgba(0,0,0,0.06)';
-  const tOff = offset % 24;
-  for (let x = -tOff; x < W + 24; x += 24) {
-    ctx.fillRect(x, gy + 16, 16, 2);
-    ctx.fillRect(x + 12, gy + 30, 16, 2);
+  // Ground texture
+  ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  const tOff = offset % 22;
+  for (let x = -tOff; x < W + 22; x += 22) {
+    ctx.fillRect(x, gy + 14, 14, 2);
+    ctx.fillRect(x + 10, gy + 28, 14, 2);
   }
 }
