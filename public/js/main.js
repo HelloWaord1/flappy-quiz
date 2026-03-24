@@ -3,6 +3,7 @@ import { drawParallaxBackground } from './parallax.js';
 import { emitCorrectParticles, emitWrongParticles, emitHeartParticles, updateParticles, drawParticles } from './particles.js';
 import { addFloatingText, updateFloatingTexts, drawFloatingTexts } from './floatingText.js';
 import { drawText, drawRoundRect, drawBird, drawGate, drawCanvasHeart } from './drawing.js';
+import { playFlap, playCorrect, playWrong, playHeartPickup, playGameOver, playPhaseUnlock } from './sounds.js';
 
 // ============================================================
 // CONFIG
@@ -78,6 +79,9 @@ let state = {
   lastTime: 0,
   flashAlpha: 0,
   flashColor: '',
+  dyingTimer: 0,
+  transitionText: '',
+  transitionTimer: 0,
 };
 
 function resetBird() {
@@ -209,6 +213,10 @@ function drawHUD() {
     ctx.restore();
   }
   drawText(ctx, String(state.score), W - 50, 88, 34, TEXT_WHITE);
+
+  // Phase counter
+  const phaseNum = state.scene === 'phase3' ? 3 : state.scene === 'phase2' ? 2 : 1;
+  drawText(ctx, `Fase ${phaseNum}/3`, W - 55, 42, 14, 'rgba(255,255,255,0.7)', 'center', false);
 }
 
 // ============================================================
@@ -269,6 +277,7 @@ function triggerDamage() {
   state.invincibleTimer = 50;
   emitWrongParticles(state.bird.x, state.bird.y);
   addFloatingText(state.bird.x + 30, state.bird.y - 20, '-❤️', '#F44336', 22);
+  playWrong();
   if (state.lives >= 0 && state.lives < MAX_LIVES) {
     state.heartPulse[state.lives] = 1;
   }
@@ -297,6 +306,7 @@ function handleGatePass(gate) {
     state.flashColor = 'rgb(76,175,80)';
     emitCorrectParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, '+10', '#4CAF50', 24);
+    playCorrect();
   } else {
     state.lives--;
     state.feedbackCorrect = false;
@@ -309,10 +319,11 @@ function handleGatePass(gate) {
     state.invincibleTimer = 40;
     emitWrongParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, '-❤️', '#F44336', 22);
+    playWrong();
     if (state.lives >= 0 && state.lives < MAX_LIVES) {
       state.heartPulse[state.lives] = 1;
     }
-    if (state.lives <= 0) { showGameOver(); return; }
+    if (state.lives <= 0) { startDying(); return; }
   }
 
   state.showingFeedback = true;
@@ -443,6 +454,7 @@ function handleTradePass(gate) {
     state.flashColor = 'rgb(76,175,80)';
     emitCorrectParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, `+$${gain}`, '#4CAF50', 22);
+    playCorrect();
   } else {
     const loss = 50 + Math.floor(Math.random() * 100);
     state.balance = Math.max(0, state.balance - loss);
@@ -450,6 +462,7 @@ function handleTradePass(gate) {
     state.flashColor = 'rgb(244,67,54)';
     emitWrongParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, `-$${loss}`, '#F44336', 22);
+    playWrong();
   }
 
   state.showingFeedback = true;
@@ -479,6 +492,12 @@ document.getElementById('capture-form')?.addEventListener('submit', async (e) =>
   e.target.innerHTML = '<p style="font-size:24px;padding:20px;">✅ Enviado!<br><br>Entraremos em contato em breve!</p>';
 });
 
+function startDying() {
+  state.scene = 'dying';
+  state.dyingTimer = 90; // ~1.5 seconds at 60fps
+  playGameOver();
+}
+
 function showGameOver() {
   state.scene = 'gameover';
   document.getElementById('share-score').textContent = `Pontuação: ${state.score} | Fase: ${state.questionIndex}`;
@@ -501,11 +520,13 @@ document.getElementById('btn-share')?.addEventListener('click', () => {
 // ============================================================
 function handleTap(tx, ty) {
   if (state.scene === 'menu') { resetPhase1(); return; }
+  if (state.scene === 'dying' || state.scene === 'transition') return;
   if (state.scene === 'phase2') { handlePhase2Tap(tx, ty); return; }
   if (state.scene === 'phase1' || state.scene === 'phase3') {
     state.bird.vel = JUMP_FORCE;
     state.bird.wingIndex = 0;
     state.bird.wingTimer = 0;
+    playFlap();
   }
 }
 
@@ -602,6 +623,7 @@ function update() {
           emitHeartParticles(h.x, h.y);
           addFloatingText(h.x, h.y - 20, '+❤️', '#FF69B4', 24);
           state.heartPulse[state.lives - 1] = 1;
+          playHeartPickup();
         }
       }
     }
@@ -621,7 +643,7 @@ function update() {
         g.passed = true;
         state.questionIndex++;
         state.correctStreak = 0;
-        if (state.lives <= 0) { showGameOver(); return; }
+        if (state.lives <= 0) { startDying(); return; }
         break;
       }
       if (!g.scored) {
@@ -635,9 +657,50 @@ function update() {
       if (!last || last.x < W - GATE_SPACING) {
         if (state.questionIndex < phase1Questions.length) spawnGate();
         else if (state.gates.every(g => g.passed || g.x < state.bird.x - 60)) {
-          startFadeOut(() => { state.scene = 'phase2'; state.p2Index = 0; state.p2Selected = -1; state.p2ShowResult = false; });
+          playPhaseUnlock();
+          startFadeOut(() => {
+            state.transitionText = '\uD83D\uDD13 QUIZ FINANCEIRO DESBLOQUEADO!';
+            state.transitionTimer = 120; // 2 seconds at 60fps
+            state.scene = 'transition';
+            state.fadeAlpha = 0;
+            state.fadeDirection = 0;
+            state._transitionNext = () => {
+              state.scene = 'phase2';
+              state.p2Index = 0;
+              state.p2Selected = -1;
+              state.p2ShowResult = false;
+              startFadeIn();
+            };
+          });
         }
       }
+    }
+  }
+
+  // Dying animation
+  if (state.scene === 'dying') {
+    state.bird.vel += GRAVITY * 1.8;
+    state.bird.y += state.bird.vel;
+    state.bird.rotation += 0.15;
+    state.dyingTimer--;
+    const groundY = H - GROUND_HEIGHT - BIRD_SIZE / 2;
+    if (state.bird.y >= groundY) {
+      state.bird.y = groundY;
+      state.bird.vel = 0;
+    }
+    if (state.dyingTimer <= 0 || state.bird.y >= groundY) {
+      showGameOver();
+    }
+  }
+
+  // Transition screen
+  if (state.scene === 'transition') {
+    state.transitionTimer--;
+    if (state.transitionTimer <= 0 && state._transitionNext) {
+      const next = state._transitionNext;
+      state._transitionNext = null;
+      state.transitionText = '';
+      next();
     }
   }
 
@@ -647,7 +710,17 @@ function update() {
       state.p2ShowResult = false;
       state.p2Selected = -1;
       state.p2Index++;
-      if (state.p2Index >= phase2Questions.length) startFadeOut(() => startPhase3());
+      if (state.p2Index >= phase2Questions.length) {
+        playPhaseUnlock();
+        startFadeOut(() => {
+          state.transitionText = '\uD83D\uDCC8 MODO TRADING DESBLOQUEADO!';
+          state.transitionTimer = 120;
+          state.scene = 'transition';
+          state.fadeAlpha = 0;
+          state.fadeDirection = 0;
+          state._transitionNext = () => startPhase3();
+        });
+      }
     }
   }
 }
@@ -661,7 +734,20 @@ function render() {
   if (state.scene === 'menu') { drawMenu(); drawFade(); return; }
   if (state.scene === 'phase2') { drawPhase2(); drawFloatingTexts(ctx); drawFade(); return; }
 
-  if (state.scene === 'phase1' || state.scene === 'phase3' || state.scene === 'leadform') {
+  // Transition screen
+  if (state.scene === 'transition') {
+    ctx.fillStyle = '#0a0a2e';
+    ctx.fillRect(0, 0, W, H);
+    const alpha = Math.min(1, (120 - state.transitionTimer) / 20);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    drawText(ctx, state.transitionText, W / 2, H / 2, 28, '#F7DC6F');
+    ctx.restore();
+    drawFade();
+    return;
+  }
+
+  if (state.scene === 'dying' || state.scene === 'phase1' || state.scene === 'phase3' || state.scene === 'leadform') {
     if (state.shakeTimer > 0) {
       ctx.save();
       ctx.translate((Math.random() - 0.5) * state.shakeIntensity, (Math.random() - 0.5) * state.shakeIntensity);
@@ -690,7 +776,7 @@ function render() {
       }
     }
 
-    drawBird(ctx, state.bird, state.hurtTimer);
+    drawBird(ctx, state.bird, state.hurtTimer, H - GROUND_HEIGHT);
     drawParticles(ctx);
     drawFloatingTexts(ctx);
     drawHUD();
@@ -709,7 +795,7 @@ function render() {
 
 function gameLoop(ts) {
   state.lastTime = ts;
-  if (state.scene !== 'gameover' && state.scene !== 'leadform') update();
+  if (state.scene !== 'gameover') update();
   render();
   requestAnimationFrame(gameLoop);
 }

@@ -43,11 +43,28 @@ export function drawRoundRect(ctx, x, y, w, h, r, fill, stroke) {
 // ============================================================
 // BIRD (3-frame wing animation, gradient body)
 // ============================================================
-export function drawBird(ctx, bird, hurtTimer) {
+export function drawBird(ctx, bird, hurtTimer, groundY) {
   const { x, y, rotation, wingIndex } = bird;
 
   if (hurtTimer > 0 && Math.floor(hurtTimer / 3) % 2 === 0) {
     return;
+  }
+
+  // Ground shadow
+  if (groundY != null) {
+    const maxDist = groundY - 50;
+    const dist = groundY - y;
+    const shadowScale = Math.max(0.2, Math.min(1, dist / maxDist));
+    const shadowWidth = BIRD_SIZE * (1.2 - shadowScale * 0.6);
+    const shadowHeight = shadowWidth * 0.3;
+    const shadowAlpha = 0.25 * (1 - shadowScale * 0.7);
+    ctx.save();
+    ctx.globalAlpha = shadowAlpha;
+    ctx.fillStyle = 'rgba(0,0,0,1)';
+    ctx.beginPath();
+    ctx.ellipse(x, groundY - 2, shadowWidth, shadowHeight, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   ctx.save();
@@ -246,7 +263,15 @@ function drawAnswerBadge(ctx, gx, passageY, gateW, passageH, letter, text) {
   ctx.fill();
   drawText(ctx, letter, pillX + 16, cy, 12, TEXT_WHITE, 'center', false);
 
-  const fontSize = Math.min(18, Math.max(12, (pillW - 40) / (text.length * 0.45)));
+  const maxTextW = pillW - 40;
+  let fontSize = Math.min(18, Math.max(10, maxTextW / (text.length * 0.45)));
+  ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+  let measured = ctx.measureText(text).width;
+  while (measured > maxTextW && fontSize > 8) {
+    fontSize -= 1;
+    ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+    measured = ctx.measureText(text).width;
+  }
   drawText(ctx, text, cx + 8, cy, fontSize, TEXT_WHITE, 'center', true);
 }
 
