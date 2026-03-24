@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Flappy Quiz</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+    <div id="ui-overlay" class="hidden"></div>
+    <div id="lead-form" class="hidden">
+      <div class="form-card">
+        <h2>🏆 Parabéns!</h2>
+        <p id="form-balance"></p>
+        <p class="form-subtitle">Mas... esse foi o modo DEMO 🎮</p>
+        <p class="form-cta">Quer jogar COM DINHEIRO REAL?</p>
+        <form id="capture-form">
+          <input type="text" name="name" placeholder="Seu nome" required>
+          <input type="tel" name="phone" placeholder="Telefone" required>
+          <input type="email" name="email" placeholder="Email" required>
+          <button type="submit">🚀 QUERO JOGAR DE VERDADE</button>
+        </form>
+        <p class="form-disclaimer">Ao clicar, seus dados serão enviados ao nosso parceiro autorizado.</p>
+      </div>
+    </div>
+    <div id="share-overlay" class="hidden">
+      <div class="share-card">
+        <h2>Game Over! 💀</h2>
+        <p id="share-score"></p>
+        <div class="share-buttons">
+          <button id="btn-retry" class="btn-primary">🔄 Tentar de novo</button>
+          <button id="btn-share" class="btn-secondary">📤 Compartilhar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

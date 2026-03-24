@@ -1,0 +1,21 @@
+{
+  "name": "flappy-quiz",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Flappy Bird quiz game funnel",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "helmet": "^8.0.0",
+    "cors": "^2.8.5",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
+}
