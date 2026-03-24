@@ -3,16 +3,17 @@ import { phase1Questions, phase2Questions, phase3Scenarios } from './data/questi
 // ============================================================
 // CONFIG
 // ============================================================
-const GRAVITY = 0.4;
-const JUMP_FORCE = -7;
-const SCROLL_SPEED = 2.2;
+const GRAVITY = 0.35;
+const JUMP_FORCE = -6.5;
+const SCROLL_SPEED = 2;
 const BIRD_SIZE = 28;
 const GROUND_HEIGHT = 70;
 const MAX_LIVES = 3;
 const GATE_WIDTH = 100;       // width of the gate obstacle
-const GATE_SPACING = 320;     // distance between gates
-const PASSAGE_HEIGHT = 90;    // height of each answer passage
-const WALL_THICKNESS = 30;    // wall between two passages
+const GATE_SPACING = 360;     // distance between gates (more room)
+const PASSAGE_HEIGHT = 130;   // height of each answer passage (WIDER!)
+const WALL_THICKNESS = 25;    // wall between two passages
+const HEART_SIZE = 22;        // collectible heart size
 
 // Colors (Flappy Bird palette)
 const SKY_TOP = '#4EC0CA';
@@ -65,6 +66,14 @@ let state = {
   feedbackText: '',
   groundOffset: 0,
   correctStreak: 0,
+  // Damage effects
+  hurtTimer: 0,          // bird blink frames remaining
+  shakeTimer: 0,         // screen shake frames remaining
+  shakeIntensity: 0,
+  invincible: false,
+  invincibleTimer: 0,
+  // Heart pickups
+  hearts: [],            // floating collectible hearts
   // Phase 2
   p2Index: 0,
   p2Selected: -1,
@@ -94,6 +103,11 @@ function resetPhase1() {
   state.showingFeedback = false;
   state.correctStreak = 0;
   state.qualifyAnswers = {};
+  state.hurtTimer = 0;
+  state.shakeTimer = 0;
+  state.invincible = false;
+  state.invincibleTimer = 0;
+  state.hearts = [];
   resetBird();
   spawnGate();
 }
@@ -164,6 +178,12 @@ function drawBackground() {
 // ============================================================
 function drawBird() {
   const { x, y, rotation, flapFrame } = state.bird;
+
+  // Blink effect when hurt — skip drawing every other frame
+  if (state.hurtTimer > 0 && Math.floor(state.hurtTimer / 3) % 2 === 0) {
+    return; // invisible frame = blink
+  }
+
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rotation);
@@ -176,8 +196,8 @@ function drawBird() {
   ctx.ellipse(2, 2, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Body
-  ctx.fillStyle = BIRD_YELLOW;
+  // Body — flash red when hurt
+  ctx.fillStyle = state.hurtTimer > 0 ? '#FF6B6B' : BIRD_YELLOW;
   ctx.beginPath();
   ctx.ellipse(0, 0, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -317,14 +337,20 @@ function drawQuestionBanner() {
   const q = qi < phase1Questions.length ? phase1Questions[qi] : null;
   if (!q) return;
 
-  drawRoundRect(15, 15, W - 30, 50, 12, 'rgba(0,0,0,0.7)');
-  // Wrap long questions
+  // Big visible banner at top
+  const bannerH = 65;
+  drawRoundRect(10, 8, W - 20, bannerH, 14, 'rgba(0,0,0,0.85)');
+
+  // Question number
+  drawText(`${qi + 1}/${phase1Questions.length}`, 40, 20, 11, '#aaa', 'center', false);
+
+  // Question text — big and bold
   const lines = q.q.split('\n');
   if (lines.length === 1) {
-    drawText(q.q, W / 2, 40, 15, TEXT_WHITE);
+    drawText(q.q, W / 2, 45, 18, '#F7DC6F');
   } else {
-    drawText(lines[0], W / 2, 32, 14, TEXT_WHITE);
-    drawText(lines[1], W / 2, 48, 14, TEXT_WHITE);
+    drawText(lines[0], W / 2, 35, 16, '#F7DC6F');
+    drawText(lines[1], W / 2, 55, 16, '#F7DC6F');
   }
 }
 
@@ -433,15 +459,17 @@ function handleGatePass(gate) {
       state.feedbackCorrect = true;
       state.correctStreak++;
       state.flashColor = 'rgb(76,175,80)';
-      // Restore life every 3 correct
-      if (state.correctStreak % 3 === 0 && state.lives < MAX_LIVES) {
-        state.lives++;
-      }
     } else {
       state.lives--;
       state.feedbackCorrect = false;
       state.correctStreak = 0;
       state.flashColor = 'rgb(244,67,54)';
+      // Blink + shake on wrong answer
+      state.hurtTimer = 35;
+      state.shakeTimer = 12;
+      state.shakeIntensity = 8;
+      state.invincible = true;
+      state.invincibleTimer = 40;
       if (state.lives <= 0) {
         showGameOver();
         return;
@@ -452,6 +480,17 @@ function handleGatePass(gate) {
     state.feedbackTimer = 30;
     state.flashAlpha = 0.4;
     state.questionIndex++;
+
+    // Spawn heart pickup after every 2nd question
+    if (state.questionIndex % 2 === 0 && state.questionIndex < phase1Questions.length) {
+      const lastGate = state.gates[state.gates.length - 1];
+      if (lastGate) {
+        const hx = lastGate.x + GATE_SPACING / 2; // midway between gates
+        const groundY = H - GROUND_HEIGHT;
+        const hy = 100 + Math.random() * (groundY - 200);
+        state.hearts.push({ x: hx, y: hy, collected: false });
+      }
+    }
   }
 }
 
@@ -696,18 +735,57 @@ function update() {
     // Flash fade
     if (state.flashAlpha > 0) state.flashAlpha -= 0.02;
 
+    // Hurt blink timer
+    if (state.hurtTimer > 0) state.hurtTimer--;
+    // Screen shake timer
+    if (state.shakeTimer > 0) {
+      state.shakeTimer--;
+      state.shakeIntensity *= 0.92; // decay
+    }
+    // Invincibility timer
+    if (state.invincibleTimer > 0) {
+      state.invincibleTimer--;
+      if (state.invincibleTimer <= 0) state.invincible = false;
+    }
+
+    // Heart pickup collision
+    for (const h of state.hearts) {
+      if (h.collected) continue;
+      h.x -= SCROLL_SPEED;
+      const dx = state.bird.x - h.x;
+      const dy = state.bird.y - h.y;
+      if (Math.sqrt(dx * dx + dy * dy) < BIRD_SIZE + HEART_SIZE / 2) {
+        h.collected = true;
+        if (state.lives < MAX_LIVES) {
+          state.lives++;
+          state.flashColor = 'rgb(255,105,180)';
+          state.flashAlpha = 0.25;
+        }
+      }
+    }
+    state.hearts = state.hearts.filter(h => !h.collected && h.x > -30);
+
     // Move gates
     for (const g of state.gates) g.x -= SCROLL_SPEED;
     state.gates = state.gates.filter(g => g.x > -GATE_WIDTH - 30);
 
     // Collision + scoring
     for (const g of state.gates) {
-      if (!g.scored && checkGateCollision(g)) {
-        // Hit a wall — lose life
+      if (!g.scored && !state.invincible && checkGateCollision(g)) {
+        // Hit a wall — lose life + effects
         state.lives--;
-        state.flashAlpha = 0.4;
+        state.flashAlpha = 0.5;
         state.flashColor = 'rgb(244,67,54)';
         state.bird.vel = JUMP_FORCE * 0.6;
+        // Blink effect
+        state.hurtTimer = 40;
+        // Screen shake
+        state.shakeTimer = 15;
+        state.shakeIntensity = 10;
+        // Brief invincibility so you don't die twice
+        state.invincible = true;
+        state.invincibleTimer = 50;
+
         g.scored = true;
         g.passed = true;
         state.questionIndex++;
@@ -760,8 +838,32 @@ function render() {
   if (state.scene === 'phase2') { drawPhase2(); return; }
 
   if (state.scene === 'phase1' || state.scene === 'phase3' || state.scene === 'leadform') {
+    // Screen shake
+    if (state.shakeTimer > 0) {
+      const sx = (Math.random() - 0.5) * state.shakeIntensity;
+      const sy = (Math.random() - 0.5) * state.shakeIntensity;
+      ctx.save();
+      ctx.translate(sx, sy);
+    }
+
     drawBackground();
     for (const g of state.gates) drawGate(g);
+
+    // Draw collectible hearts
+    for (const h of state.hearts) {
+      if (!h.collected) {
+        const bobY = Math.sin(state.frameCount * 0.08 + h.x) * 6;
+        ctx.font = `${HEART_SIZE}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText('❤️', h.x, h.y + bobY);
+        // Glow
+        ctx.fillStyle = 'rgba(255,80,80,0.15)';
+        ctx.beginPath();
+        ctx.arc(h.x, h.y + bobY, HEART_SIZE, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
     drawBird();
     drawHUD();
 
@@ -770,6 +872,10 @@ function render() {
 
     drawFeedbackText();
     drawFeedback();
+
+    if (state.shakeTimer > 0) {
+      ctx.restore();
+    }
   }
 }
 
