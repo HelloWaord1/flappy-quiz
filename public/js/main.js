@@ -139,8 +139,9 @@ function resetPhase1() {
   clearTrail();
   resetBird();
   spawnGate();
-  startFadeIn();
-  // Feature 1: Start countdown
+  // Start countdown (no fade — countdown IS the intro)
+  state.fadeAlpha = 0;
+  state.fadeDirection = 0;
   state.countdown = startCountdown(state.countdown);
 }
 
@@ -163,7 +164,8 @@ function continueFromCheckpoint() {
   resetBird();
   // questionIndex is NOT reset -- continue from where died
   spawnGate();
-  startFadeIn();
+  state.fadeAlpha = 0;
+  state.fadeDirection = 0;
   state.countdown = startCountdown(state.countdown);
 }
 
@@ -217,10 +219,8 @@ function drawQuestionBanner() {
     ? Math.max(0, Math.min(1, (gateDistance - 120) / 130))
     : 0;
 
-  // Top banner
+  // Top banner only
   const bannerH = 65;
-  ctx.save();
-  ctx.globalAlpha = 1 - t * 0.3;
   drawRoundRect(ctx, 10, 8, W - 20, bannerH, 14, 'rgba(0,0,0,0.85)');
   drawText(ctx, `${qi + 1}/${phase1Questions.length}`, 40, 20, 11, '#aaa', 'center', false);
   const lines = q.q.split('\n');
@@ -229,30 +229,6 @@ function drawQuestionBanner() {
   } else {
     drawText(ctx, lines[0], W / 2, 35, 16, '#F7DC6F');
     drawText(ctx, lines[1], W / 2, 55, 16, '#F7DC6F');
-  }
-  ctx.restore();
-
-  // Center question when gates are far
-  if (t > 0.1) {
-    ctx.save();
-    ctx.globalAlpha = t * 0.9;
-    const centerY = H * 0.35;
-    const boxW = Math.min(W - 40, 340);
-    const boxH = lines.length > 1 ? 90 : 65;
-    drawRoundRect(ctx, W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 18, 'rgba(0,0,0,0.75)');
-    ctx.strokeStyle = 'rgba(247,220,111,0.4)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 18);
-    ctx.stroke();
-    const fontSize = Math.min(24, W / 18);
-    if (lines.length === 1) {
-      drawText(ctx, q.q, W / 2, centerY, fontSize, '#F7DC6F');
-    } else {
-      drawText(ctx, lines[0], W / 2, centerY - 14, fontSize * 0.85, '#F7DC6F');
-      drawText(ctx, lines[1], W / 2, centerY + 14, fontSize * 0.85, '#F7DC6F');
-    }
-    ctx.restore();
   }
 }
 
@@ -797,8 +773,6 @@ function update() {
     if (!state.countdown.active) {
       // Countdown finished -- start actual gameplay
       state.scene = 'phase1';
-      // Feature 2: Show tutorial on first game
-      state.tutorial = showTutorial(state.tutorial);
     }
     return;
   }
