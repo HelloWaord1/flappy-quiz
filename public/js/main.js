@@ -252,8 +252,7 @@ function drawHUD() {
     drawText(ctx, String(state.score), W - 50, 28, 30, TEXT_WHITE);
   }
 
-  const phaseNum = isPhase3 ? 3 : state.scene === 'phase2' ? 2 : 1;
-  drawText(ctx, `Fase ${phaseNum}/3`, W - 55, 12, 12, 'rgba(255,255,255,0.6)', 'center', false);
+  // Phase label removed — looked like debug log
 }
 
 // ============================================================
