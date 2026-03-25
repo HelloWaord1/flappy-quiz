@@ -136,6 +136,7 @@ function resetPhase1() {
   state.coins = [];
   state.heartPulse = [0, 0, 0];
   state.continuesUsed = 0;
+  state.nextSpawnIndex = 0;
   clearTrail();
   resetBird();
   spawnGate();
@@ -160,6 +161,7 @@ function continueFromCheckpoint() {
   state.coins = [];
   state.heartPulse = [0, 0, 0];
   state.continuesUsed++;
+  state.nextSpawnIndex = state.questionIndex;
   clearTrail();
   resetBird();
   // questionIndex is NOT reset -- continue from where died
@@ -272,8 +274,9 @@ function drawFeedbackText() {
 // GATE LOGIC
 // ============================================================
 function spawnGate() {
-  // Store questionIndex at spawn time — question will be resolved dynamically
-  const qIndex = state.questionIndex + state.gates.filter(g => !g.scored).length;
+  // Each gate gets a sequential index, never skips
+  const qIndex = state.nextSpawnIndex;
+  state.nextSpawnIndex++;
   const totalH = PASSAGE_HEIGHT * 2 + WALL_THICKNESS;
   const minTop = 80;
   const maxTop = H - GROUND_HEIGHT - totalH - 40;
@@ -876,7 +879,7 @@ function update() {
     if (state.scene === 'phase1') {
       const last = state.gates[state.gates.length - 1];
       if (!last || last.x < W - GATE_SPACING) {
-        if (state.questionIndex < phase1Questions.length) spawnGate();
+        if (state.nextSpawnIndex < phase1Questions.length) spawnGate();
         else if (state.gates.every(g => g.scored) || state.gates.length === 0) {
           playPhaseUnlock();
           startFadeOut(() => {
