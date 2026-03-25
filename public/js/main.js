@@ -53,9 +53,10 @@ let W, H, scale;
 function resize() {
   W = window.innerWidth;
   H = window.innerHeight;
-  scale = window.devicePixelRatio || 1;
-  canvas.width = W * scale;
-  canvas.height = H * scale;
+  // Cap DPI at 1.5 — high DPI (2-3x) means 4-9x more pixels = kills budget Android
+  scale = Math.min(window.devicePixelRatio || 1, 1.5);
+  canvas.width = Math.round(W * scale);
+  canvas.height = Math.round(H * scale);
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
   ctx.setTransform(scale, 0, 0, scale, 0, 0);

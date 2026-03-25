@@ -5,17 +5,19 @@
   "description": "Flappy Bird quiz game funnel",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js",
+    "build": "esbuild public/js/main.js --bundle --minify --outfile=public/js/bundle.js --format=esm",
+    "start": "npm run build && node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "vitest run"
   },
   "dependencies": {
+    "cors": "^2.8.5",
     "express": "^4.21.0",
     "helmet": "^8.0.0",
-    "cors": "^2.8.5",
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "esbuild": "^0.27.4",
     "vitest": "^2.1.0"
   }
 }
