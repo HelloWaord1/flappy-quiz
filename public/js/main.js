@@ -216,22 +216,29 @@ function drawQuestionBanner() {
   if (!q) return;
 
   const qi = nextGate.qIndex != null ? nextGate.qIndex : state.questionIndex;
-  const gateDistance = nextGate ? nextGate.x - state.bird.x : 999;
-  const t = nextGate
-    ? Math.max(0, Math.min(1, (gateDistance - 120) / 130))
-    : 0;
 
-  // Top banner only
-  const bannerH = 65;
-  drawRoundRect(ctx, 10, 8, W - 20, bannerH, 14, 'rgba(0,0,0,0.85)');
-  drawText(ctx, `${qi + 1}/${phase1Questions.length}`, 40, 20, 11, '#aaa', 'center', false);
+  // Center of screen — big, clear, impossible to miss
+  const centerY = H * 0.28;
   const lines = q.q.split('\n');
+  const boxW = Math.min(W - 30, 360);
+  const boxH = lines.length > 1 ? 85 : 60;
+
+  // Dark pill background
+  ctx.save();
+  drawRoundRect(ctx, W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 16, 'rgba(0,0,0,0.8)');
+
+  // Question counter — small, top-left of pill
+  drawText(ctx, `${qi + 1}/${phase1Questions.length}`, W / 2 - boxW / 2 + 28, centerY - boxH / 2 + 12, 10, '#888', 'center', false);
+
+  // Question text — big yellow
+  const fontSize = Math.min(20, boxW / (q.q.length * 0.42));
   if (lines.length === 1) {
-    drawText(ctx, q.q, W / 2, 45, 18, '#F7DC6F');
+    drawText(ctx, q.q, W / 2, centerY, Math.max(fontSize, 15), '#F7DC6F');
   } else {
-    drawText(ctx, lines[0], W / 2, 35, 16, '#F7DC6F');
-    drawText(ctx, lines[1], W / 2, 55, 16, '#F7DC6F');
+    drawText(ctx, lines[0], W / 2, centerY - 12, Math.max(fontSize, 14), '#F7DC6F');
+    drawText(ctx, lines[1], W / 2, centerY + 12, Math.max(fontSize, 14), '#F7DC6F');
   }
+  ctx.restore();
 }
 
 // ============================================================
