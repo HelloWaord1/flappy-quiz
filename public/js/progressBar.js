@@ -3,7 +3,7 @@
 // ============================================================
 
 const BAR_HEIGHT = 4;
-const BAR_Y_OFFSET = 75;
+const BAR_Y_OFFSET = 48;
 const BAR_RADIUS = 2;
 
 export function drawProgressBar(ctx, W, currentIndex, totalQuestions) {

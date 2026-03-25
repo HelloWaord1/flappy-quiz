@@ -24,8 +24,8 @@ const GROUND_HEIGHT = 70;
 const MAX_LIVES = 3;
 const GATE_WIDTH = 100;
 const GATE_SPACING = 360;
-const PASSAGE_HEIGHT = 200;
-const WALL_THICKNESS = 16;
+const PASSAGE_HEIGHT = 240;
+const WALL_THICKNESS = 14;
 const HEART_SIZE = 22;
 const TEXT_WHITE = '#FFFFFF';
 const CORRECT_COLOR = '#4CAF50';
@@ -213,7 +213,7 @@ function drawQuestionBanner() {
   if (!q) return;
 
   const qi = nextGate.qIndex != null ? nextGate.qIndex : state.questionIndex;
-  const centerY = H * 0.28;
+  const centerY = H * 0.14;
   const lines = q.q.split('\n');
   const boxW = Math.min(W - 30, 360);
   const boxH = lines.length > 1 ? 85 : 60;
@@ -238,7 +238,7 @@ function drawHUD() {
 
   for (let i = 0; i < MAX_LIVES; i++) {
     const hx = 22 + i * 36;
-    const hy = 90;
+    const hy = 28;
     const pulse = state.heartPulse[i] || 0;
     const s = 1 + pulse * 0.3;
     ctx.save();
@@ -249,11 +249,11 @@ function drawHUD() {
   }
 
   if (!isPhase3) {
-    drawText(ctx, String(state.score), W - 50, 88, 34, TEXT_WHITE);
+    drawText(ctx, String(state.score), W - 50, 28, 30, TEXT_WHITE);
   }
 
   const phaseNum = isPhase3 ? 3 : state.scene === 'phase2' ? 2 : 1;
-  drawText(ctx, `Fase ${phaseNum}/3`, W - 55, 42, 14, 'rgba(255,255,255,0.7)', 'center', false);
+  drawText(ctx, `Fase ${phaseNum}/3`, W - 55, 12, 12, 'rgba(255,255,255,0.6)', 'center', false);
 }
 
 // ============================================================
@@ -535,7 +535,7 @@ function drawPhase2QuestionBanner() {
   if (!q) return;
 
   const qi = nextGate.qIndex != null ? nextGate.qIndex : state.questionIndex;
-  const centerY = H * 0.28;
+  const centerY = H * 0.14;
   const lines = q.q.split('\n');
   const boxW = Math.min(W - 30, 360);
   const boxH = lines.length > 1 ? 85 : 60;
