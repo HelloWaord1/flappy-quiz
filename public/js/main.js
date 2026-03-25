@@ -390,7 +390,10 @@ function handleGatePass(gate) {
     state.qualifyAnswers[question.q] = chose === 'a' ? question.a : question.b;
   }
 
-  if (correct) {
+  // Qualifying questions: any answer is "correct" (we just collect data)
+  const isCorrect = question.qualifying ? true : correct;
+
+  if (isCorrect) {
     state.correctStreak++;
     let basePoints = 10;
 
@@ -874,7 +877,7 @@ function update() {
       const last = state.gates[state.gates.length - 1];
       if (!last || last.x < W - GATE_SPACING) {
         if (state.questionIndex < phase1Questions.length) spawnGate();
-        else if (state.gates.every(g => g.passed || g.x < state.bird.x - 60)) {
+        else if (state.gates.every(g => g.scored) || state.gates.length === 0) {
           playPhaseUnlock();
           startFadeOut(() => {
             state.transitionText = '\uD83D\uDD13 QUIZ FINANCEIRO DESBLOQUEADO!';
