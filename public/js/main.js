@@ -481,58 +481,109 @@ function handleGatePass(gate) {
 // ============================================================
 // PHASE 2: FINANCIAL QUIZ
 // ============================================================
-function drawPhase2() {
-  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
-  bgGrad.addColorStop(0, '#0a0a2e');
-  bgGrad.addColorStop(1, '#1a1a4a');
-  ctx.fillStyle = bgGrad;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.fillStyle = 'rgba(247,220,111,0.05)';
-  for (let i = 0; i < 8; i++) {
-    ctx.beginPath();
-    ctx.arc((state.frameCount * 0.5 + i * 137) % W, (state.frameCount * 0.3 + i * 89) % H, 2 + i % 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const q = phase2Questions[state.p2Index];
-  if (!q) { startPhase3(); return; }
-
-  drawText(ctx, `Pergunta ${state.p2Index + 1}/${phase2Questions.length}`, W / 2, 40, 16, '#888', 'center', false);
-  drawText(ctx, '💰 QUIZ FINANCEIRO', W / 2, 80, 22, '#F7DC6F');
-  q.q.split('\n').forEach((line, i) => drawText(ctx, line, W / 2, 130 + i * 28, 18, TEXT_WHITE));
-
-  const optY = 200;
-  q.options.forEach((opt, i) => {
-    const y = optY + i * 62;
-    let bg = '#1a1a4a';
-    if (state.p2ShowResult) {
-      if (i === q.correct) bg = CORRECT_COLOR;
-      else if (i === state.p2Selected) bg = WRONG_COLOR;
-    }
-    drawRoundRect(ctx, 24, y, W - 48, 50, 12, bg, '#555');
-    drawText(ctx, opt, W / 2, y + 25, 15, TEXT_WHITE);
-  });
-  drawText(ctx, `Pontuação: ${state.score}`, W / 2, H - 35, 14, '#888', 'center', false);
+// Phase 2 is now a flappy bird level with financial questions
+function startPhase2() {
+  state.scene = 'phase2';
+  state.gates = [];
+  state.hearts = [];
+  state.coins = [];
+  state.showingFeedback = false;
+  state.correctStreak = 0;
+  state.questionIndex = 0;
+  state.nextSpawnIndex = 0;
+  state.hurtTimer = 0;
+  state.shakeTimer = 0;
+  state.invincible = false;
+  state.invincibleTimer = 0;
+  clearTrail();
+  resetBird();
+  spawnPhase2Gate();
 }
 
-function handlePhase2Tap(tx, ty) {
-  if (state.p2ShowResult) return;
-  const optY = 200;
-  const q = phase2Questions[state.p2Index];
-  for (let i = 0; i < q.options.length; i++) {
-    const y = optY + i * 62;
-    if (tx > 24 && tx < W - 24 && ty > y && ty < y + 50) {
-      state.p2Selected = i;
-      state.p2ShowResult = true;
-      if (i === q.correct) {
-        state.score += 20;
-        addFloatingText(W / 2, y + 25, '+20', '#4CAF50', 26);
-      }
-      state.p2Timer = 45;
-      return;
-    }
+function spawnPhase2Gate() {
+  const qIndex = state.nextSpawnIndex;
+  state.nextSpawnIndex++;
+  const totalH = PASSAGE_HEIGHT * 2 + WALL_THICKNESS;
+  const minTop = 80;
+  const maxTop = H - GROUND_HEIGHT - totalH - 40;
+  const topPassageY = minTop + Math.random() * Math.max(maxTop - minTop, 0);
+  const lastGate = state.gates[state.gates.length - 1];
+  const startX = lastGate ? Math.max(W + 80, lastGate.x + GATE_SPACING) : W + 120;
+  state.gates.push({ x: startX, topPassageY, qIndex, passed: false, scored: false, result: null, golden: false, isPhase2: true });
+}
+
+function getPhase2Question(gate) {
+  if (gate.qIndex != null && gate.qIndex < phase2Questions.length) {
+    return phase2Questions[gate.qIndex];
   }
+  return null;
+}
+
+function handlePhase2GatePass(gate) {
+  const question = getPhase2Question(gate);
+  if (gate.scored || !question) return;
+  if (state.bird.x <= gate.x + GATE_WIDTH) return;
+
+  gate.scored = true;
+  gate.passed = true;
+  const midWallCenter = gate.topPassageY + PASSAGE_HEIGHT + WALL_THICKNESS / 2;
+  const chose = state.bird.y < midWallCenter ? 'a' : 'b';
+  const correct = chose === question.correct;
+  gate.result = { chose, correct };
+
+  if (correct) {
+    state.score += 15;
+    state.feedbackCorrect = true;
+    state.correctStreak++;
+    state.flashColor = 'rgb(76,175,80)';
+    emitCorrectParticles(state.bird.x, state.bird.y);
+    addFloatingText(state.bird.x + 30, state.bird.y - 20, '+15', '#4CAF50', 24);
+    playCorrect();
+  } else {
+    state.lives--;
+    state.feedbackCorrect = false;
+    state.correctStreak = 0;
+    state.flashColor = 'rgb(244,67,54)';
+    state.hurtTimer = 35;
+    state.shakeTimer = 12;
+    state.shakeIntensity = 8;
+    state.invincible = true;
+    state.invincibleTimer = 40;
+    emitWrongParticles(state.bird.x, state.bird.y);
+    addFloatingText(state.bird.x + 30, state.bird.y - 20, '-❤️', '#F44336', 22);
+    playWrong();
+    if (state.lives <= 0) { startDying(); return; }
+  }
+
+  state.showingFeedback = true;
+  state.feedbackTimer = 30;
+  state.flashAlpha = 0.4;
+  state.questionIndex++;
+}
+
+function drawPhase2QuestionBanner() {
+  const nextGate = state.gates.find(g => !g.scored);
+  const q = nextGate ? getPhase2Question(nextGate) : null;
+  if (!q) return;
+
+  const qi = nextGate.qIndex != null ? nextGate.qIndex : state.questionIndex;
+  const centerY = H * 0.28;
+  const lines = q.q.split('\n');
+  const boxW = Math.min(W - 30, 360);
+  const boxH = lines.length > 1 ? 85 : 60;
+
+  ctx.save();
+  drawRoundRect(ctx, W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 16, 'rgba(0,0,0,0.8)');
+  drawText(ctx, `💰 ${qi + 1}/${phase2Questions.length}`, W / 2 - boxW / 2 + 35, centerY - boxH / 2 + 12, 10, '#F7DC6F', 'center', false);
+
+  const fontSize = Math.min(20, boxW / (q.q.length * 0.42));
+  if (lines.length === 1) {
+    drawText(ctx, q.q, W / 2, centerY, Math.max(fontSize, 15), '#F7DC6F');
+  } else {
+    drawText(ctx, lines[0], W / 2, centerY - 12, Math.max(fontSize, 14), '#F7DC6F');
+    drawText(ctx, lines[1], W / 2, centerY + 12, Math.max(fontSize, 14), '#F7DC6F');
+  }
+  ctx.restore();
 }
 
 // ============================================================
@@ -701,8 +752,8 @@ function handleTap(tx, ty) {
   // Feature 1: During countdown, ignore taps
   if (state.scene === 'countdown') return;
   if (state.scene === 'dying' || state.scene === 'transition') return;
-  if (state.scene === 'phase2') { handlePhase2Tap(tx, ty); return; }
-  if (state.scene === 'phase1' || state.scene === 'phase3') {
+  // Phase 2 is now flappy — tap = jump (handled below with phase1/phase3)
+  if (state.scene === 'phase1' || state.scene === 'phase2' || state.scene === 'phase3') {
     // Feature 2: Dismiss tutorial on first tap
     if (state.tutorial.visible) {
       state.tutorial = dismissTutorial(state.tutorial);
@@ -797,7 +848,7 @@ function update() {
     return;
   }
 
-  if (state.scene === 'phase1' || state.scene === 'phase3') {
+  if (state.scene === 'phase1' || state.scene === 'phase2' || state.scene === 'phase3') {
     // Feature 2: Update tutorial
     state.tutorial = updateTutorial(state.tutorial);
 
@@ -886,6 +937,7 @@ function update() {
       }
       if (!g.scored) {
         if (state.scene === 'phase1') handleGatePass(g);
+        else if (state.scene === 'phase2') handlePhase2GatePass(g);
         else handleTradePass(g);
       }
     }
@@ -908,12 +960,33 @@ function update() {
             state.fadeDirection = 0;
             emitConfetti(W);
             state._transitionNext = () => {
-              state.scene = 'phase2';
-              state.p2Index = 0;
-              state.p2Selected = -1;
-              state.p2ShowResult = false;
+              startPhase2();
               startFadeIn();
             };
+          });
+        }
+      }
+    }
+
+    // Phase 2: financial flappy bird — spawn gates and transition to phase 3
+    if (state.scene === 'phase2') {
+      const last = state.gates[state.gates.length - 1];
+      const allSpawned = state.nextSpawnIndex >= phase2Questions.length;
+      const allDone = state.gates.length === 0 || state.gates.every(g => g.scored);
+
+      if (!last || last.x < W - GATE_SPACING) {
+        if (!allSpawned) spawnPhase2Gate();
+        else if (allDone && state.fadeDirection === 0 && state.scene === 'phase2') {
+          playPhaseUnlock();
+          state.scene = 'phase2_ending';
+          startFadeOut(() => {
+            state.transitionText = '\uD83D\uDCC8 MODO TRADING DESBLOQUEADO!';
+            state.transitionTimer = 120;
+            state.scene = 'transition';
+            state.fadeAlpha = 0;
+            state.fadeDirection = 0;
+            emitConfetti(W);
+            state._transitionNext = () => { startPhase3(); startFadeIn(); };
           });
         }
       }
@@ -947,26 +1020,7 @@ function update() {
     }
   }
 
-  if (state.scene === 'phase2' && state.p2ShowResult) {
-    state.p2Timer--;
-    if (state.p2Timer <= 0) {
-      state.p2ShowResult = false;
-      state.p2Selected = -1;
-      state.p2Index++;
-      if (state.p2Index >= phase2Questions.length) {
-        playPhaseUnlock();
-        startFadeOut(() => {
-          state.transitionText = '\uD83D\uDCC8 MODO TRADING DESBLOQUEADO!';
-          state.transitionTimer = 120;
-          state.scene = 'transition';
-          state.fadeAlpha = 0;
-          state.fadeDirection = 0;
-          emitConfetti(W);
-          state._transitionNext = () => startPhase3();
-        });
-      }
-    }
-  }
+  // Old fullscreen phase2 quiz removed — phase2 is now flappy bird
 }
 
 // ============================================================
@@ -976,13 +1030,13 @@ function render() {
   ctx.clearRect(0, 0, W, H);
 
   if (state.scene === 'menu') { drawMenu(); drawFade(); return; }
-  if (state.scene === 'phase2') { drawPhase2(); drawFloatingTexts(ctx); drawFade(); return; }
+  // Phase 2 is now a flappy level — handled below with phase1/phase3
 
   // Feature 1: Countdown scene rendering
   if (state.scene === 'countdown') {
     drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset, getCurrentPhase());
     for (const g of state.gates) {
-      const resolvedGate = { ...g, question: getGateQuestion(g) };
+      const resolvedGate = { ...g, question: g.isPhase2 ? getPhase2Question(g) : getGateQuestion(g) };
       drawGate(ctx, resolvedGate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
     }
     drawBird(ctx, state.bird, state.hurtTimer, H - GROUND_HEIGHT, getCurrentPhase());
@@ -1007,7 +1061,7 @@ function render() {
     return;
   }
 
-  if (state.scene === 'dying' || state.scene === 'phase1' || state.scene === 'phase1_ending' || state.scene === 'phase3' || state.scene === 'leadform') {
+  if (state.scene === 'dying' || state.scene === 'phase1' || state.scene === 'phase1_ending' || state.scene === 'phase2' || state.scene === 'phase2_ending' || state.scene === 'phase3' || state.scene === 'leadform') {
     if (state.shakeTimer > 0) {
       ctx.save();
       ctx.translate((Math.random() - 0.5) * state.shakeIntensity, (Math.random() - 0.5) * state.shakeIntensity);
@@ -1016,7 +1070,7 @@ function render() {
     drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset, getCurrentPhase());
     for (const g of state.gates) {
       // Resolve question dynamically so it always matches current state
-      const resolvedGate = { ...g, question: getGateQuestion(g) };
+      const resolvedGate = { ...g, question: g.isPhase2 ? getPhase2Question(g) : getGateQuestion(g) };
       drawGate(ctx, resolvedGate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
     }
 
@@ -1100,8 +1154,11 @@ function render() {
 
     if (state.scene === 'phase1') {
       drawQuestionBanner();
-      // Feature 3: Progress bar
       drawProgressBar(ctx, W, state.questionIndex, phase1Questions.length);
+    }
+    if (state.scene === 'phase2') {
+      drawPhase2QuestionBanner();
+      drawProgressBar(ctx, W, state.questionIndex, phase2Questions.length);
     }
     if (state.scene === 'phase3') {
       drawPhase3HUD();

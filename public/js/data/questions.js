@@ -1,6 +1,4 @@
-// Phase 1: Quiz gates — bird flies through correct answer
-// correct: "a" = top passage, "b" = bottom passage
-// Randomized so player has to actually read!
+// Phase 1: General quiz + qualifying
 export const phase1Questions = [
   // Level 1-5: Stupid easy
   { q: "Qual é a capital do Brasil?", a: "Brasília", b: "Rio de Janeiro", correct: "a" },
@@ -14,20 +12,23 @@ export const phase1Questions = [
   { q: "Quantos estados tem o Brasil?", a: "24", b: "26 + DF", correct: "b" },
   { q: "O que é PIX?", a: "Pagamento instantâneo", b: "Rede social", correct: "a" },
   { q: "Qual moeda dos EUA?", a: "Euro", b: "Dólar", correct: "b" },
-  // Level 11-14: Qualifying
+  // Level 11-14: Qualifying (any answer = correct)
   { q: "Sua renda mensal?", a: "Mais de R$2.000", b: "Menos de R$2.000", correct: "a", qualifying: true },
   { q: "Tem dinheiro para investir?", a: "Não tenho", b: "Sim, tenho reserva", correct: "b", qualifying: true },
   { q: "Já investiu alguma vez?", a: "Sim, já tentei", b: "Nunca", correct: "a", qualifying: true },
   { q: "Sua idade?", a: "21 ou mais", b: "Menos de 21", correct: "a", qualifying: true },
 ];
 
-// Phase 2: Financial quiz (fullscreen Q&A between flappy phases)
+// Phase 2: Financial quiz — ALSO as flappy bird gates (Level 2)
 export const phase2Questions = [
-  { q: "O que é inflação?", options: ["Aumento geral dos preços", "Queda do dólar", "Taxa de juros", "Imposto"], correct: 0 },
-  { q: "O que significa diversificar\ninvestimentos?", options: ["Investir em vários ativos", "Investir tudo em ações", "Guardar na poupança", "Comprar dólar"], correct: 0 },
-  { q: "O que é Tesouro Direto?", options: ["Títulos públicos", "Ações da bolsa", "Criptomoeda", "Conta poupança"], correct: 0 },
-  { q: "Qual o maior risco de investir?", options: ["Perder o capital", "Ganhar muito", "Pagar impostos", "Nenhum risco"], correct: 0 },
-  { q: "O que é renda passiva?", options: ["Dinheiro sem trabalho ativo", "Salário mensal", "Empréstimo", "Dívida"], correct: 0 },
+  { q: "O que é inflação?", a: "Preços sobem", b: "Preços caem", correct: "a" },
+  { q: "Diversificar é...", a: "Vários ativos", b: "Tudo em um só", correct: "a" },
+  { q: "Tesouro Direto é...", a: "Títulos públicos", b: "Criptomoeda", correct: "a" },
+  { q: "Maior risco de investir?", a: "Perder capital", b: "Nenhum risco", correct: "a" },
+  { q: "Renda passiva é...", a: "Ganho sem trabalho ativo", b: "Salário mensal", correct: "a" },
+  { q: "Juros compostos são...", a: "Juros sobre juros", b: "Juros fixos", correct: "a" },
+  { q: "O que é uma ação?", a: "Parte de uma empresa", b: "Tipo de imposto", correct: "a" },
+  { q: "Poupança rende mais que\ninflação?", a: "Nem sempre", b: "Sempre", correct: "a" },
 ];
 
 // Phase 3: Trading scenarios (price direction)
