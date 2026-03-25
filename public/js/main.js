@@ -878,10 +878,14 @@ function update() {
 
     if (state.scene === 'phase1') {
       const last = state.gates[state.gates.length - 1];
+      const allSpawned = state.nextSpawnIndex >= phase1Questions.length;
+      const allDone = state.gates.length === 0 || state.gates.every(g => g.scored);
+
       if (!last || last.x < W - GATE_SPACING) {
-        if (state.nextSpawnIndex < phase1Questions.length) spawnGate();
-        else if (state.gates.every(g => g.scored) || state.gates.length === 0) {
+        if (!allSpawned) spawnGate();
+        else if (allDone && state.fadeDirection === 0 && state.scene === 'phase1') {
           playPhaseUnlock();
+          state.scene = 'phase1_ending'; // prevent re-triggering
           startFadeOut(() => {
             state.transitionText = '\uD83D\uDD13 QUIZ FINANCEIRO DESBLOQUEADO!';
             state.transitionTimer = 120; // 2 seconds at 60fps
@@ -989,7 +993,7 @@ function render() {
     return;
   }
 
-  if (state.scene === 'dying' || state.scene === 'phase1' || state.scene === 'phase3' || state.scene === 'leadform') {
+  if (state.scene === 'dying' || state.scene === 'phase1' || state.scene === 'phase1_ending' || state.scene === 'phase3' || state.scene === 'leadform') {
     if (state.shakeTimer > 0) {
       ctx.save();
       ctx.translate((Math.random() - 0.5) * state.shakeIntensity, (Math.random() - 0.5) * state.shakeIntensity);
