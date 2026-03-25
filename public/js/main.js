@@ -219,7 +219,7 @@ function drawQuestionBanner() {
   const boxH = lines.length > 1 ? 85 : 60;
 
   drawRoundRect(ctx, W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 16, 'rgba(0,0,0,0.8)');
-  drawText(ctx, `${qi + 1}/${phase1Questions.length}`, W / 2 - boxW / 2 + 28, centerY - boxH / 2 + 12, 10, '#888', 'center', false);
+  // No question counter — cleaner look
 
   const fontSize = Math.min(20, boxW / (q.q.length * 0.42));
   if (lines.length === 1) {
@@ -538,7 +538,7 @@ function drawPhase2QuestionBanner() {
   const boxH = lines.length > 1 ? 85 : 60;
 
   drawRoundRect(ctx, W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 16, 'rgba(0,0,0,0.8)');
-  drawText(ctx, `\uD83D\uDCB0 ${qi + 1}/${phase2Questions.length}`, W / 2 - boxW / 2 + 35, centerY - boxH / 2 + 12, 10, '#F7DC6F', 'center', false);
+  // No question counter — cleaner look
 
   const fontSize = Math.min(20, boxW / (q.q.length * 0.42));
   if (lines.length === 1) {
@@ -589,12 +589,12 @@ function drawPhase3HUD() {
   // Balance at top
   drawAnimatedBalance(ctx, state.balanceAnim, W);
 
-  // News hint below balance
+  // News hint below balance — BIG and readable
   const next = state.gates.find(g => !g.passed);
   if (next?.scenario) {
-    drawRoundRect(ctx, 12, 62, W - 24, 44, 10, 'rgba(0,0,0,0.7)');
-    drawText(ctx, next.scenario.hint, W / 2, 76, 12, TEXT_WHITE);
-    drawText(ctx, '\u2B06\uFE0F BUY (cima)  \u2B07\uFE0F SELL (baixo)', W / 2, 94, 10, '#aaa');
+    drawRoundRect(ctx, 10, 56, W - 20, 56, 12, 'rgba(0,0,0,0.8)');
+    drawText(ctx, next.scenario.hint, W / 2, 74, 16, TEXT_WHITE);
+    drawText(ctx, '\u2B06\uFE0F BUY (cima)  \u2B07\uFE0F SELL (baixo)', W / 2, 98, 13, '#ccc');
   }
 }
 
