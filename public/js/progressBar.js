@@ -3,7 +3,7 @@
 // ============================================================
 
 const BAR_HEIGHT = 4;
-const BAR_Y_OFFSET = 75; // below question banner
+const BAR_Y_OFFSET = 75;
 const BAR_RADIUS = 2;
 
 export function drawProgressBar(ctx, W, currentIndex, totalQuestions) {
@@ -20,13 +20,10 @@ export function drawProgressBar(ctx, W, currentIndex, totalQuestions) {
   ctx.roundRect(barX, y, barW, BAR_HEIGHT, BAR_RADIUS);
   ctx.fill();
 
-  // Filled portion
+  // Filled portion (flat color instead of gradient for perf)
   if (progress > 0) {
     const fillW = Math.max(BAR_HEIGHT, barW * progress);
-    const grad = ctx.createLinearGradient(barX, 0, barX + fillW, 0);
-    grad.addColorStop(0, '#4CAF50');
-    grad.addColorStop(1, '#81C784');
-    ctx.fillStyle = grad;
+    ctx.fillStyle = '#66BB6A';
     ctx.beginPath();
     ctx.roundRect(barX, y, fillW, BAR_HEIGHT, BAR_RADIUS);
     ctx.fill();

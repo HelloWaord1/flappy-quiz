@@ -58,8 +58,7 @@ export function drawCountdown(ctx, countdownState, W, H) {
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fillRect(0, 0, W, H);
 
-  ctx.save();
   ctx.globalAlpha = Math.min(1, countdownState.scale - 0.5);
   drawText(ctx, label, W / 2, H * 0.4, size, label === 'GO!' ? '#4CAF50' : '#F7DC6F');
-  ctx.restore();
+  ctx.globalAlpha = 1;
 }

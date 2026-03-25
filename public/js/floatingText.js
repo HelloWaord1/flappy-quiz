@@ -1,50 +1,70 @@
 // ============================================================
-// FLOATING SCORE TEXT
+// FLOATING SCORE TEXT (OPTIMIZED — pool, reduced save/restore)
 // ============================================================
 
+const MAX_FLOATING = 20;
 const floatingTexts = [];
+const ftPool = [];
 
-export function addFloatingText(x, y, text, color, size = 22) {
-  floatingTexts.push({
-    x, y,
-    text,
-    color,
-    size,
-    life: 50,
-    maxLife: 50,
-    vy: -1.5,
-  });
+function acquireFT() {
+  if (ftPool.length > 0) return ftPool.pop();
+  return {};
 }
 
-export function updateFloatingTexts() {
+function releaseFT(ft) {
+  if (ftPool.length < MAX_FLOATING) ftPool.push(ft);
+}
+
+export function addFloatingText(x, y, text, color, size = 22) {
+  if (floatingTexts.length >= MAX_FLOATING) {
+    // Recycle oldest
+    const old = floatingTexts.shift();
+    releaseFT(old);
+  }
+  const ft = acquireFT();
+  ft.x = x;
+  ft.y = y;
+  ft.text = text;
+  ft.color = color;
+  ft.size = size;
+  ft.life = 50;
+  ft.maxLife = 50;
+  ft.vy = -1.5;
+  floatingTexts.push(ft);
+}
+
+export function updateFloatingTexts(dt) {
+  const dtFactor = dt || 1;
   for (let i = floatingTexts.length - 1; i >= 0; i--) {
     const ft = floatingTexts[i];
-    ft.y += ft.vy;
-    ft.vy *= 0.97;
-    ft.life--;
+    ft.y += ft.vy * dtFactor;
+    ft.vy *= Math.pow(0.97, dtFactor);
+    ft.life -= dtFactor;
     if (ft.life <= 0) {
-      floatingTexts.splice(i, 1);
+      // Swap-and-pop
+      const last = floatingTexts[floatingTexts.length - 1];
+      floatingTexts[i] = last;
+      floatingTexts.pop();
+      releaseFT(ft);
     }
   }
 }
 
 export function drawFloatingTexts(ctx) {
-  for (const ft of floatingTexts) {
+  for (let i = 0; i < floatingTexts.length; i++) {
+    const ft = floatingTexts[i];
     const alpha = Math.max(0, ft.life / ft.maxLife);
-    const scale = 0.8 + 0.4 * (1 - alpha); // starts big, shrinks slightly
-    ctx.save();
+    const scale = 0.8 + 0.4 * (1 - alpha);
     ctx.globalAlpha = alpha;
     ctx.font = `bold ${Math.round(ft.size * scale)}px Arial, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    // Outline
     ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     ctx.lineWidth = 3;
     ctx.lineJoin = 'round';
     ctx.strokeText(ft.text, ft.x, ft.y);
-    // Fill
     ctx.fillStyle = ft.color;
     ctx.fillText(ft.text, ft.x, ft.y);
-    ctx.restore();
   }
+  ctx.globalAlpha = 1;
 }

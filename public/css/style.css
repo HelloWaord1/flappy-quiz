@@ -1,7 +1,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; overflow: hidden; background: #4EC0CA; font-family: 'Arial', sans-serif; }
-#game-container { width: 100%; height: 100%; position: relative; touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-#game-canvas { display: block; width: 100%; height: 100%; }
+#game-container { width: 100%; height: 100%; position: relative; touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; contain: strict; }
+#game-canvas { display: block; width: 100%; height: 100%; will-change: transform; touch-action: manipulation; }
 .hidden { display: none !important; }
 
 /* Lead Form */

@@ -10,6 +10,8 @@ import { drawProgressBar } from './progressBar.js';
 import { getHighScore, saveHighScore } from './leaderboard.js';
 import { shareWithImage } from './shareCard.js';
 import { createBalanceAnimState, updateBalanceAnim, drawAnimatedBalance } from './balanceAnim.js';
+import { updatePerfmon, drawFpsCounter, getQualityLevel } from './perfmon.js';
+import { invalidateCache } from './gradientCache.js';
 
 // ============================================================
 // CONFIG
@@ -38,12 +40,13 @@ const COMBO_THRESHOLDS = [
 ];
 const GOLDEN_GATE_INTERVAL = 5;
 const GOLDEN_SCORE_MULTIPLIER = 3;
+const TARGET_FRAME_MS = 16.667; // 60fps reference
 
 // ============================================================
 // CANVAS SETUP
 // ============================================================
 const canvas = document.getElementById('game-canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { alpha: false });
 let W, H, scale;
 
 function resize() {
@@ -55,6 +58,7 @@ function resize() {
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  invalidateCache();
 }
 resize();
 window.addEventListener('resize', resize);
@@ -93,19 +97,15 @@ let state = {
   p3TradeCount: 0,
   qualifyAnswers: {},
   frameCount: 0,
-  lastTime: 0,
+  lastTimestamp: 0,
   flashAlpha: 0,
   flashColor: '',
   dyingTimer: 0,
   transitionText: '',
   transitionTimer: 0,
-  // Feature 1: Countdown
   countdown: createCountdownState(),
-  // Feature 2: Tutorial
   tutorial: createTutorialState(),
-  // Feature 5: Continue
   continuesUsed: 0,
-  // Feature 7: Balance animation
   balanceAnim: createBalanceAnimState(),
 };
 
@@ -140,17 +140,15 @@ function resetPhase1() {
   clearTrail();
   resetBird();
   spawnGate();
-  // Start countdown (no fade — countdown IS the intro)
   state.fadeAlpha = 0;
   state.fadeDirection = 0;
   state.countdown = startCountdown(state.countdown);
 }
 
-// Feature 5: Continue from checkpoint
 function continueFromCheckpoint() {
   state.scene = 'countdown';
   state.gates = [];
-  state.lives = 2; // Penalty: 2 lives instead of 3
+  state.lives = 2;
   state.showingFeedback = false;
   state.correctStreak = 0;
   state.hurtTimer = 0;
@@ -164,7 +162,6 @@ function continueFromCheckpoint() {
   state.nextSpawnIndex = state.questionIndex;
   clearTrail();
   resetBird();
-  // questionIndex is NOT reset -- continue from where died
   spawnGate();
   state.fadeAlpha = 0;
   state.fadeDirection = 0;
@@ -186,17 +183,17 @@ function startFadeOut(callback) {
   state.fadeCallback = callback;
 }
 
-function updateFade() {
+function updateFade(dt) {
   if (state.fadeDirection === 0) return;
   if (state.fadeDirection === 1) {
-    state.fadeAlpha = Math.min(1, state.fadeAlpha + 0.03);
+    state.fadeAlpha = Math.min(1, state.fadeAlpha + 0.03 * dt);
     if (state.fadeAlpha >= 1 && state.fadeCallback) {
       state.fadeCallback();
       state.fadeCallback = null;
       state.fadeDirection = -1;
     }
   } else if (state.fadeDirection === -1) {
-    state.fadeAlpha = Math.max(0, state.fadeAlpha - 0.03);
+    state.fadeAlpha = Math.max(0, state.fadeAlpha - 0.03 * dt);
     if (state.fadeAlpha <= 0) state.fadeDirection = 0;
   }
 }
@@ -208,7 +205,7 @@ function drawFade() {
 }
 
 // ============================================================
-// QUESTION DISPLAY (center + banner transition)
+// QUESTION DISPLAY
 // ============================================================
 function drawQuestionBanner() {
   const nextGate = state.gates.find(g => !g.scored);
@@ -216,21 +213,14 @@ function drawQuestionBanner() {
   if (!q) return;
 
   const qi = nextGate.qIndex != null ? nextGate.qIndex : state.questionIndex;
-
-  // Center of screen — big, clear, impossible to miss
   const centerY = H * 0.28;
   const lines = q.q.split('\n');
   const boxW = Math.min(W - 30, 360);
   const boxH = lines.length > 1 ? 85 : 60;
 
-  // Dark pill background
-  ctx.save();
   drawRoundRect(ctx, W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 16, 'rgba(0,0,0,0.8)');
-
-  // Question counter — small, top-left of pill
   drawText(ctx, `${qi + 1}/${phase1Questions.length}`, W / 2 - boxW / 2 + 28, centerY - boxH / 2 + 12, 10, '#888', 'center', false);
 
-  // Question text — big yellow
   const fontSize = Math.min(20, boxW / (q.q.length * 0.42));
   if (lines.length === 1) {
     drawText(ctx, q.q, W / 2, centerY, Math.max(fontSize, 15), '#F7DC6F');
@@ -238,7 +228,6 @@ function drawQuestionBanner() {
     drawText(ctx, lines[0], W / 2, centerY - 12, Math.max(fontSize, 14), '#F7DC6F');
     drawText(ctx, lines[1], W / 2, centerY + 12, Math.max(fontSize, 14), '#F7DC6F');
   }
-  ctx.restore();
 }
 
 // ============================================================
@@ -247,7 +236,6 @@ function drawQuestionBanner() {
 function drawHUD() {
   const isPhase3 = state.scene === 'phase3';
 
-  // Hearts (show in all phases)
   for (let i = 0; i < MAX_LIVES; i++) {
     const hx = 22 + i * 36;
     const hy = 90;
@@ -260,12 +248,10 @@ function drawHUD() {
     ctx.restore();
   }
 
-  // Score — only in phase 1 (phase 3 has balance instead)
   if (!isPhase3) {
     drawText(ctx, String(state.score), W - 50, 88, 34, TEXT_WHITE);
   }
 
-  // Phase counter
   const phaseNum = isPhase3 ? 3 : state.scene === 'phase2' ? 2 : 1;
   drawText(ctx, `Fase ${phaseNum}/3`, W - 55, 42, 14, 'rgba(255,255,255,0.7)', 'center', false);
 }
@@ -281,14 +267,13 @@ function drawFeedback() {
 
 function drawFeedbackText() {
   if (!state.showingFeedback) return;
-  drawText(ctx, state.feedbackCorrect ? '✅' : '❌', W / 2, H / 2, 72, TEXT_WHITE);
+  drawText(ctx, state.feedbackCorrect ? '\u2705' : '\u274C', W / 2, H / 2, 72, TEXT_WHITE);
 }
 
 // ============================================================
 // GATE LOGIC
 // ============================================================
 function spawnGate() {
-  // Each gate gets a sequential index, never skips
   const qIndex = state.nextSpawnIndex;
   state.nextSpawnIndex++;
   const totalH = PASSAGE_HEIGHT * 2 + WALL_THICKNESS;
@@ -297,27 +282,24 @@ function spawnGate() {
   const topPassageY = minTop + Math.random() * Math.max(maxTop - minTop, 0);
   const lastGate = state.gates[state.gates.length - 1];
   const startX = lastGate ? Math.max(W + 80, lastGate.x + GATE_SPACING) : W + 120;
-  // Every 5th question (index 4, 9, etc.) is a golden gate
   const golden = (qIndex + 1) % GOLDEN_GATE_INTERVAL === 0;
   state.gates.push({ x: startX, topPassageY, qIndex, passed: false, scored: false, result: null, golden });
 
-  // Spawn coins between previous gate and this one
   if (lastGate) {
     spawnCoinsBetweenGates(lastGate.x + GATE_WIDTH, startX);
   }
 }
 
 function spawnCoinsBetweenGates(fromX, toX) {
-  const coinCount = 3 + Math.floor(Math.random() * 3); // 3-5 coins
+  const coinCount = 3 + Math.floor(Math.random() * 3);
   const midX = (fromX + toX) / 2;
   const spread = (toX - fromX) * 0.5;
   const groundY = H - GROUND_HEIGHT;
   const centerY = 100 + Math.random() * (groundY - 220);
 
   for (let i = 0; i < coinCount; i++) {
-    const t = (i / (coinCount - 1)) - 0.5; // -0.5 to 0.5
+    const t = (i / (coinCount - 1)) - 0.5;
     const coinX = midX + t * spread;
-    // Arc shape: highest in middle
     const arcY = centerY - (1 - t * t * 4) * 30;
     state.coins.push({
       x: coinX,
@@ -328,7 +310,6 @@ function spawnCoinsBetweenGates(fromX, toX) {
   }
 }
 
-// Resolve question for a gate dynamically (always uses current mapping)
 function getGateQuestion(gate) {
   if (gate.qIndex != null && gate.qIndex < phase1Questions.length) {
     return phase1Questions[gate.qIndex];
@@ -342,7 +323,6 @@ function checkGateCollision(gate) {
   if (bx + r < gate.x || bx - r > gate.x + GATE_WIDTH) return false;
 
   if (gate.golden) {
-    // Golden gate: single passage
     const gapCenter = gate.topPassageY + PASSAGE_HEIGHT;
     const gapHalf = PASSAGE_HEIGHT;
     const gapTop = gapCenter - gapHalf / 2;
@@ -375,7 +355,7 @@ function triggerDamage() {
   state.invincible = true;
   state.invincibleTimer = 50;
   emitWrongParticles(state.bird.x, state.bird.y);
-  addFloatingText(state.bird.x + 30, state.bird.y - 20, '-❤️', '#F44336', 22);
+  addFloatingText(state.bird.x + 30, state.bird.y - 20, '-\u2764\uFE0F', '#F44336', 22);
   playWrong();
   if (state.lives >= 0 && state.lives < MAX_LIVES) {
     state.heartPulse[state.lives] = 1;
@@ -390,10 +370,8 @@ function handleGatePass(gate) {
   gate.scored = true;
   gate.passed = true;
 
-  // Determine which passage the bird chose
   let chose;
   if (gate.golden) {
-    // Golden gate: single passage split into top half (A) and bottom half (B)
     const gapCenter = gate.topPassageY + PASSAGE_HEIGHT;
     chose = state.bird.y < gapCenter ? 'a' : 'b';
   } else {
@@ -407,19 +385,16 @@ function handleGatePass(gate) {
     state.qualifyAnswers[question.q] = chose === 'a' ? question.a : question.b;
   }
 
-  // Qualifying questions: any answer is "correct" (we just collect data)
   const isCorrect = question.qualifying ? true : correct;
 
   if (isCorrect) {
     state.correctStreak++;
     let basePoints = 10;
 
-    // Golden gate bonus: x3 points
     if (gate.golden) {
       basePoints = basePoints * GOLDEN_SCORE_MULTIPLIER;
     }
 
-    // Combo multiplier
     const combo = getComboMultiplier(state.correctStreak);
     const multiplier = combo ? combo.multiplier : 1;
     const points = basePoints * multiplier;
@@ -429,18 +404,12 @@ function handleGatePass(gate) {
     state.flashColor = 'rgb(76,175,80)';
     emitCorrectParticles(state.bird.x, state.bird.y);
 
-    // Build floating text
     let floatText = `+${points}`;
     if (gate.golden) floatText = `\u2B50 ${floatText}`;
     addFloatingText(state.bird.x + 30, state.bird.y - 20, floatText, '#4CAF50', 24);
 
-    // Show combo text if active
     if (combo) {
-      addFloatingText(
-        state.bird.x, state.bird.y - 50,
-        `\uD83D\uDD25 COMBO ${combo.label}!`,
-        '#FF6600', 28
-      );
+      addFloatingText(state.bird.x, state.bird.y - 50, `\uD83D\uDD25 COMBO ${combo.label}!`, '#FF6600', 28);
       playCombo();
     }
 
@@ -456,7 +425,7 @@ function handleGatePass(gate) {
     state.invincible = true;
     state.invincibleTimer = 40;
     emitWrongParticles(state.bird.x, state.bird.y);
-    addFloatingText(state.bird.x + 30, state.bird.y - 20, '-❤️', '#F44336', 22);
+    addFloatingText(state.bird.x + 30, state.bird.y - 20, '-\u2764\uFE0F', '#F44336', 22);
     playWrong();
     if (state.lives >= 0 && state.lives < MAX_LIVES) {
       state.heartPulse[state.lives] = 1;
@@ -481,7 +450,6 @@ function handleGatePass(gate) {
 // ============================================================
 // PHASE 2: FINANCIAL QUIZ
 // ============================================================
-// Phase 2 is now a flappy bird level with financial questions
 function startPhase2() {
   state.scene = 'phase2';
   state.gates = [];
@@ -550,7 +518,7 @@ function handlePhase2GatePass(gate) {
     state.invincible = true;
     state.invincibleTimer = 40;
     emitWrongParticles(state.bird.x, state.bird.y);
-    addFloatingText(state.bird.x + 30, state.bird.y - 20, '-❤️', '#F44336', 22);
+    addFloatingText(state.bird.x + 30, state.bird.y - 20, '-\u2764\uFE0F', '#F44336', 22);
     playWrong();
     if (state.lives <= 0) { startDying(); return; }
   }
@@ -572,9 +540,8 @@ function drawPhase2QuestionBanner() {
   const boxW = Math.min(W - 30, 360);
   const boxH = lines.length > 1 ? 85 : 60;
 
-  ctx.save();
   drawRoundRect(ctx, W / 2 - boxW / 2, centerY - boxH / 2, boxW, boxH, 16, 'rgba(0,0,0,0.8)');
-  drawText(ctx, `💰 ${qi + 1}/${phase2Questions.length}`, W / 2 - boxW / 2 + 35, centerY - boxH / 2 + 12, 10, '#F7DC6F', 'center', false);
+  drawText(ctx, `\uD83D\uDCB0 ${qi + 1}/${phase2Questions.length}`, W / 2 - boxW / 2 + 35, centerY - boxH / 2 + 12, 10, '#F7DC6F', 'center', false);
 
   const fontSize = Math.min(20, boxW / (q.q.length * 0.42));
   if (lines.length === 1) {
@@ -583,7 +550,6 @@ function drawPhase2QuestionBanner() {
     drawText(ctx, lines[0], W / 2, centerY - 12, Math.max(fontSize, 14), '#F7DC6F');
     drawText(ctx, lines[1], W / 2, centerY + 12, Math.max(fontSize, 14), '#F7DC6F');
   }
-  ctx.restore();
 }
 
 // ============================================================
@@ -596,7 +562,6 @@ function startPhase3() {
   state.gates = [];
   state.coins = [];
   state.showingFeedback = false;
-  // Feature 7: Reset balance animation
   state.balanceAnim = { ...createBalanceAnimState() };
   clearTrail();
   resetBird();
@@ -610,20 +575,19 @@ function startPhase3() {
       x: W + 120 + i * GATE_SPACING,
       topPassageY: minTop + Math.random() * Math.max(maxTop - minTop, 0),
       scenario: phase3Scenarios[i],
-      question: { a: '📈 BUY', b: '📉 SELL', correct: phase3Scenarios[i].direction === 'up' ? 'a' : 'b' },
+      question: { a: '\uD83D\uDCC8 BUY', b: '\uD83D\uDCC9 SELL', correct: phase3Scenarios[i].direction === 'up' ? 'a' : 'b' },
       passed: false, scored: false, result: null,
     });
   }
 }
 
 function drawPhase3HUD() {
-  // Feature 7: Animated balance display
   drawAnimatedBalance(ctx, state.balanceAnim, W);
   const next = state.gates.find(g => !g.passed);
   if (next?.scenario) {
     drawRoundRect(ctx, 12, 12, W - 24, 50, 12, 'rgba(0,0,0,0.7)');
     drawText(ctx, next.scenario.hint, W / 2, 30, 12, TEXT_WHITE);
-    drawText(ctx, '⬆️ BUY (cima)  ⬇️ SELL (baixo)', W / 2, 48, 11, '#aaa');
+    drawText(ctx, '\u2B06\uFE0F BUY (cima)  \u2B07\uFE0F SELL (baixo)', W / 2, 48, 11, '#aaa');
   }
 }
 
@@ -672,7 +636,7 @@ function handleTradePass(gate) {
 // LEAD FORM / GAME OVER / SHARE
 // ============================================================
 function showLeadForm() {
-  document.getElementById('form-balance').textContent = `Seu saldo: $${state.balance.toLocaleString()} 🤑`;
+  document.getElementById('form-balance').textContent = `Seu saldo: $${state.balance.toLocaleString()} \uD83E\uDD11`;
   document.getElementById('lead-form').classList.remove('hidden');
 }
 
@@ -682,19 +646,18 @@ document.getElementById('capture-form')?.addEventListener('submit', async (e) =>
   const data = { name: fd.get('name'), phone: fd.get('phone'), email: fd.get('email'), score: state.score, balance: state.balance, phase: 3, answers: state.qualifyAnswers };
   try { await fetch('/api/leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); }
   catch (err) { console.error('Lead submission failed:', err); }
-  e.target.innerHTML = '<p style="font-size:24px;padding:20px;">✅ Enviado!<br><br>Entraremos em contato em breve!</p>';
+  e.target.innerHTML = '<p style="font-size:24px;padding:20px;">\u2705 Enviado!<br><br>Entraremos em contato em breve!</p>';
 });
 
 function startDying() {
   state.scene = 'dying';
-  state.dyingTimer = 90; // ~1.5 seconds at 60fps
+  state.dyingTimer = 90;
   playGameOver();
 }
 
 function showGameOver() {
   state.scene = 'gameover';
 
-  // Feature 4: Leaderboard -- check and save high score
   const isNewRecord = saveHighScore(state.score);
   const highScore = getHighScore();
 
@@ -713,7 +676,6 @@ function showGameOver() {
     }
   }
 
-  // Feature 5: Show continue button only if not used yet and still in phase1
   const continueBtn = document.getElementById('btn-continue');
   if (continueBtn) {
     if (state.continuesUsed === 0 && state.questionIndex > 0 && state.questionIndex < phase1Questions.length) {
@@ -731,13 +693,11 @@ document.getElementById('btn-retry')?.addEventListener('click', () => {
   resetPhase1();
 });
 
-// Feature 5: Continue button
 document.getElementById('btn-continue')?.addEventListener('click', () => {
   document.getElementById('share-overlay').classList.add('hidden');
   continueFromCheckpoint();
 });
 
-// Feature 6: Viral share card
 document.getElementById('btn-share')?.addEventListener('click', () => {
   const phaseNum = state.scene === 'phase3' ? 3 : state.questionIndex >= phase1Questions.length ? 2 : 1;
   const highScore = getHighScore();
@@ -745,16 +705,13 @@ document.getElementById('btn-share')?.addEventListener('click', () => {
 });
 
 // ============================================================
-// INPUT
+// INPUT (passive touch events)
 // ============================================================
 function handleTap(tx, ty) {
   if (state.scene === 'menu') { resetPhase1(); return; }
-  // Feature 1: During countdown, ignore taps
   if (state.scene === 'countdown') return;
   if (state.scene === 'dying' || state.scene === 'transition') return;
-  // Phase 2 is now flappy — tap = jump (handled below with phase1/phase3)
   if (state.scene === 'phase1' || state.scene === 'phase2' || state.scene === 'phase3') {
-    // Feature 2: Dismiss tutorial on first tap
     if (state.tutorial.visible) {
       state.tutorial = dismissTutorial(state.tutorial);
     }
@@ -766,6 +723,7 @@ function handleTap(tx, ty) {
 }
 
 canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); handleTap(e.clientX, e.clientY); });
+canvas.addEventListener('touchstart', (e) => { /* handled by pointerdown */ }, { passive: true });
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); handleTap(W / 2, H / 2); }
 });
@@ -778,17 +736,10 @@ function drawMenu() {
   drawText(ctx, 'FLAPPY', W / 2, H * 0.22, 52, '#F7DC6F');
   drawText(ctx, 'QUIZ', W / 2, H * 0.22 + 58, 52, TEXT_WHITE);
 
-  // Bobbing bird
   const my = H * 0.46 + Math.sin(state.frameCount * 0.05) * 12;
-  const savedBird = { ...state.bird };
-  const savedHurt = state.hurtTimer;
-  state.hurtTimer = 0;
   const menuBird = { x: W / 2, y: my, vel: 0, rotation: Math.sin(state.frameCount * 0.03) * 0.1, flapFrame: state.frameCount, wingIndex: Math.floor((state.frameCount * 0.15) % 3), wingTimer: 0 };
   drawBird(ctx, menuBird, 0);
-  state.bird = savedBird;
-  state.hurtTimer = savedHurt;
 
-  // Pulsing button
   const btnPulse = 1 + Math.sin(state.frameCount * 0.06) * 0.04;
   ctx.save();
   const btnCY = H * 0.6 + 26;
@@ -805,12 +756,11 @@ function drawMenu() {
   ctx.beginPath();
   ctx.roundRect(W / 2 - 80, btnY, 160, 52, 16);
   ctx.stroke();
-  drawText(ctx, '▶ JOGAR', W / 2, btnY + 26, 24, TEXT_WHITE);
+  drawText(ctx, '\u25B6 JOGAR', W / 2, btnY + 26, 24, TEXT_WHITE);
   ctx.restore();
 
   drawText(ctx, 'Toque para come\u00e7ar', W / 2, H * 0.75, 15, 'rgba(255,255,255,0.6)');
 
-  // Feature 4: Show high score on menu
   const highScore = getHighScore();
   if (highScore > 0) {
     drawText(ctx, `Recorde: ${highScore}`, W / 2, H * 0.68, 16, 'rgba(255,255,255,0.5)', 'center', false);
@@ -818,45 +768,42 @@ function drawMenu() {
 }
 
 // ============================================================
-// UPDATE
+// UPDATE (delta-time based)
 // ============================================================
-function update() {
+function update(dt) {
   state.frameCount++;
-  updateFade();
-  updateParticles();
-  updateFloatingTexts();
+  updateFade(dt);
+  updateParticles(dt);
+  updateFloatingTexts(dt);
 
   for (let i = 0; i < state.heartPulse.length; i++) {
-    if (state.heartPulse[i] > 0) state.heartPulse[i] = Math.max(0, state.heartPulse[i] - 0.04);
+    if (state.heartPulse[i] > 0) state.heartPulse[i] = Math.max(0, state.heartPulse[i] - 0.04 * dt);
   }
 
-  // Feature 1: Countdown update
+  // Countdown update
   if (state.scene === 'countdown') {
     state.countdown = updateCountdown(state.countdown);
-    // Bird hovers in place -- no gravity
     state.bird.wingTimer++;
     if (state.bird.wingTimer > 5) { state.bird.wingTimer = 0; state.bird.wingIndex = (state.bird.wingIndex + 1) % 3; }
     state.bird.flapFrame++;
-    // Gentle bob
     state.bird.y = H * 0.4 + Math.sin(state.frameCount * 0.05) * 6;
     state.bird.rotation = 0;
-    state.groundOffset += SCROLL_SPEED * 0.3;
+    state.groundOffset += SCROLL_SPEED * 0.3 * dt;
     if (!state.countdown.active) {
-      // Countdown finished -- start actual gameplay
       state.scene = 'phase1';
     }
     return;
   }
 
   if (state.scene === 'phase1' || state.scene === 'phase2' || state.scene === 'phase3') {
-    // Feature 2: Update tutorial
     state.tutorial = updateTutorial(state.tutorial);
 
-    state.bird.vel += GRAVITY;
-    state.bird.y += state.bird.vel;
+    // Delta-time physics
+    state.bird.vel += GRAVITY * dt;
+    state.bird.y += state.bird.vel * dt;
     state.bird.rotation = Math.min(state.bird.vel * 0.06, Math.PI / 4);
     state.bird.flapFrame++;
-    state.groundOffset += SCROLL_SPEED;
+    state.groundOffset += SCROLL_SPEED * dt;
 
     state.bird.wingTimer++;
     if (state.bird.wingTimer > 5) { state.bird.wingTimer = 0; state.bird.wingIndex = (state.bird.wingIndex + 1) % 3; }
@@ -864,13 +811,12 @@ function update() {
     if (state.bird.y > H - GROUND_HEIGHT - BIRD_SIZE / 2) { state.bird.y = H - GROUND_HEIGHT - BIRD_SIZE / 2; state.bird.vel = 0; }
     if (state.bird.y < BIRD_SIZE / 2) { state.bird.y = BIRD_SIZE / 2; state.bird.vel = 0; }
 
-    if (state.showingFeedback) { state.feedbackTimer--; if (state.feedbackTimer <= 0) state.showingFeedback = false; }
-    if (state.flashAlpha > 0) state.flashAlpha -= 0.02;
-    if (state.hurtTimer > 0) state.hurtTimer--;
-    if (state.shakeTimer > 0) { state.shakeTimer--; state.shakeIntensity *= 0.92; }
-    if (state.invincibleTimer > 0) { state.invincibleTimer--; if (state.invincibleTimer <= 0) state.invincible = false; }
+    if (state.showingFeedback) { state.feedbackTimer -= dt; if (state.feedbackTimer <= 0) state.showingFeedback = false; }
+    if (state.flashAlpha > 0) state.flashAlpha -= 0.02 * dt;
+    if (state.hurtTimer > 0) state.hurtTimer -= dt;
+    if (state.shakeTimer > 0) { state.shakeTimer -= dt; state.shakeIntensity *= Math.pow(0.92, dt); }
+    if (state.invincibleTimer > 0) { state.invincibleTimer -= dt; if (state.invincibleTimer <= 0) state.invincible = false; }
 
-    // Feature 7: Update balance animation in phase3
     if (state.scene === 'phase3') {
       state.balanceAnim = updateBalanceAnim(state.balanceAnim, state.balance);
     }
@@ -878,17 +824,17 @@ function update() {
     // Heart pickups
     for (const h of state.hearts) {
       if (h.collected) continue;
-      h.x -= SCROLL_SPEED;
+      h.x -= SCROLL_SPEED * dt;
       const dx = state.bird.x - h.x;
       const dy = state.bird.y - h.y;
-      if (Math.sqrt(dx * dx + dy * dy) < BIRD_SIZE + HEART_SIZE / 2) {
+      if (dx * dx + dy * dy < (BIRD_SIZE + HEART_SIZE / 2) * (BIRD_SIZE + HEART_SIZE / 2)) {
         h.collected = true;
         if (state.lives < MAX_LIVES) {
           state.lives++;
           state.flashColor = 'rgb(255,105,180)';
           state.flashAlpha = 0.25;
           emitHeartParticles(h.x, h.y);
-          addFloatingText(h.x, h.y - 20, '+❤️', '#FF69B4', 24);
+          addFloatingText(h.x, h.y - 20, '+\u2764\uFE0F', '#FF69B4', 24);
           state.heartPulse[state.lives - 1] = 1;
           playHeartPickup();
         }
@@ -896,13 +842,14 @@ function update() {
     }
     state.hearts = state.hearts.filter(h => !h.collected && h.x > -30);
 
-    // Coin pickups
+    // Coin pickups (squared distance check — no sqrt)
+    const coinCollectSq = COIN_COLLECT_RADIUS * COIN_COLLECT_RADIUS;
     for (const c of state.coins) {
       if (c.collected) continue;
-      c.x -= SCROLL_SPEED;
+      c.x -= SCROLL_SPEED * dt;
       const dx = state.bird.x - c.x;
       const dy = state.bird.y - c.y;
-      if (Math.sqrt(dx * dx + dy * dy) < COIN_COLLECT_RADIUS) {
+      if (dx * dx + dy * dy < coinCollectSq) {
         c.collected = true;
         state.score += COIN_POINTS;
         emitCoinParticles(c.x, c.y);
@@ -912,13 +859,14 @@ function update() {
     }
     state.coins = state.coins.filter(c => !c.collected && c.x > -30);
 
-    // Combo trail: emit fire particles behind bird when combo >= 3
+    // Combo trail
     updateTrail(state.bird.x, state.bird.y);
     if (state.correctStreak >= 3 && state.frameCount % 2 === 0) {
       emitComboTrail(state.bird.x, state.bird.y);
     }
 
-    for (const g of state.gates) g.x -= SCROLL_SPEED;
+    const scrollDelta = SCROLL_SPEED * dt;
+    for (const g of state.gates) g.x -= scrollDelta;
     state.gates = state.gates.filter(g => g.x > -GATE_WIDTH - 30);
 
     for (const g of state.gates) {
@@ -951,10 +899,10 @@ function update() {
         if (!allSpawned) spawnGate();
         else if (allDone && state.fadeDirection === 0 && state.scene === 'phase1') {
           playPhaseUnlock();
-          state.scene = 'phase1_ending'; // prevent re-triggering
+          state.scene = 'phase1_ending';
           startFadeOut(() => {
             state.transitionText = '\uD83D\uDD13 QUIZ FINANCEIRO DESBLOQUEADO!';
-            state.transitionTimer = 120; // 2 seconds at 60fps
+            state.transitionTimer = 120;
             state.scene = 'transition';
             state.fadeAlpha = 0;
             state.fadeDirection = 0;
@@ -968,7 +916,6 @@ function update() {
       }
     }
 
-    // Phase 2: financial flappy bird — spawn gates and transition to phase 3
     if (state.scene === 'phase2') {
       const last = state.gates[state.gates.length - 1];
       const allSpawned = state.nextSpawnIndex >= phase2Questions.length;
@@ -995,10 +942,10 @@ function update() {
 
   // Dying animation
   if (state.scene === 'dying') {
-    state.bird.vel += GRAVITY * 1.8;
-    state.bird.y += state.bird.vel;
-    state.bird.rotation += 0.15;
-    state.dyingTimer--;
+    state.bird.vel += GRAVITY * 1.8 * dt;
+    state.bird.y += state.bird.vel * dt;
+    state.bird.rotation += 0.15 * dt;
+    state.dyingTimer -= dt;
     const groundY = H - GROUND_HEIGHT - BIRD_SIZE / 2;
     if (state.bird.y >= groundY) {
       state.bird.y = groundY;
@@ -1011,7 +958,7 @@ function update() {
 
   // Transition screen
   if (state.scene === 'transition') {
-    state.transitionTimer--;
+    state.transitionTimer -= dt;
     if (state.transitionTimer <= 0 && state._transitionNext) {
       const next = state._transitionNext;
       state._transitionNext = null;
@@ -1019,8 +966,6 @@ function update() {
       next();
     }
   }
-
-  // Old fullscreen phase2 quiz removed — phase2 is now flappy bird
 }
 
 // ============================================================
@@ -1029,10 +974,9 @@ function update() {
 function render() {
   ctx.clearRect(0, 0, W, H);
 
-  if (state.scene === 'menu') { drawMenu(); drawFade(); return; }
-  // Phase 2 is now a flappy level — handled below with phase1/phase3
+  if (state.scene === 'menu') { drawMenu(); drawFade(); drawFpsCounter(ctx, W); return; }
 
-  // Feature 1: Countdown scene rendering
+  // Countdown scene
   if (state.scene === 'countdown') {
     drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset, getCurrentPhase());
     for (const g of state.gates) {
@@ -1044,6 +988,7 @@ function render() {
     drawQuestionBanner();
     drawCountdown(ctx, state.countdown, W, H);
     drawFade();
+    drawFpsCounter(ctx, W);
     return;
   }
 
@@ -1051,13 +996,13 @@ function render() {
   if (state.scene === 'transition') {
     ctx.fillStyle = '#0a0a2e';
     ctx.fillRect(0, 0, W, H);
-    drawParticles(ctx); // confetti particles
+    drawParticles(ctx);
     const alpha = Math.min(1, (120 - state.transitionTimer) / 20);
-    ctx.save();
     ctx.globalAlpha = alpha;
     drawText(ctx, state.transitionText, W / 2, H / 2, 28, '#F7DC6F');
-    ctx.restore();
+    ctx.globalAlpha = 1;
     drawFade();
+    drawFpsCounter(ctx, W);
     return;
   }
 
@@ -1068,12 +1013,13 @@ function render() {
     }
 
     drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset, getCurrentPhase());
+
     for (const g of state.gates) {
-      // Resolve question dynamically so it always matches current state
       const resolvedGate = { ...g, question: g.isPhase2 ? getPhase2Question(g) : getGateQuestion(g) };
       drawGate(ctx, resolvedGate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
     }
 
+    // Hearts
     for (const h of state.hearts) {
       if (!h.collected) {
         const bobY = Math.sin(state.frameCount * 0.04 + h.seed) * 5;
@@ -1090,7 +1036,8 @@ function render() {
       }
     }
 
-    // Draw coins
+    // Coins
+    const quality = getQualityLevel();
     for (const c of state.coins) {
       if (c.collected) continue;
       const bobY = Math.sin(state.frameCount * 0.06 + c.seed) * 3;
@@ -1098,20 +1045,26 @@ function render() {
       ctx.save();
       ctx.translate(c.x, c.y + bobY);
 
-      // Glow
-      ctx.globalAlpha = 0.2 * sparkle;
-      ctx.fillStyle = '#FFD700';
-      ctx.beginPath();
-      ctx.arc(0, 0, COIN_RADIUS * 1.6, 0, Math.PI * 2);
-      ctx.fill();
+      // Glow (skip on low)
+      if (quality !== 'low') {
+        ctx.globalAlpha = 0.2 * sparkle;
+        ctx.fillStyle = '#FFD700';
+        ctx.beginPath();
+        ctx.arc(0, 0, COIN_RADIUS * 1.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       // Coin body
       ctx.globalAlpha = sparkle;
-      const coinGrad = ctx.createRadialGradient(-2, -2, 1, 0, 0, COIN_RADIUS);
-      coinGrad.addColorStop(0, '#FFF176');
-      coinGrad.addColorStop(0.6, '#FFD700');
-      coinGrad.addColorStop(1, '#DAA520');
-      ctx.fillStyle = coinGrad;
+      if (quality === 'low') {
+        ctx.fillStyle = '#FFD700';
+      } else {
+        const coinGrad = ctx.createRadialGradient(-2, -2, 1, 0, 0, COIN_RADIUS);
+        coinGrad.addColorStop(0, '#FFF176');
+        coinGrad.addColorStop(0.6, '#FFD700');
+        coinGrad.addColorStop(1, '#DAA520');
+        ctx.fillStyle = coinGrad;
+      }
       ctx.beginPath();
       ctx.arc(0, 0, COIN_RADIUS, 0, Math.PI * 2);
       ctx.fill();
@@ -1130,7 +1083,7 @@ function render() {
       ctx.restore();
     }
 
-    // Bird trail (combo glow effect)
+    // Bird trail
     drawBirdTrail(ctx, state.correctStreak >= 3);
 
     drawBird(ctx, state.bird, state.hurtTimer, H - GROUND_HEIGHT, getCurrentPhase());
@@ -1138,7 +1091,7 @@ function render() {
     drawFloatingTexts(ctx);
     drawHUD();
 
-    // Combo indicator in HUD
+    // Combo indicator
     if (state.correctStreak >= 3 && (state.scene === 'phase1' || state.scene === 'phase3')) {
       const combo = getComboMultiplier(state.correctStreak);
       if (combo) {
@@ -1162,14 +1115,12 @@ function render() {
     }
     if (state.scene === 'phase3') {
       drawPhase3HUD();
-      // Feature 3: Progress bar for phase 3
       drawProgressBar(ctx, W, state.p3TradeCount, phase3Scenarios.length);
     }
 
     drawFeedbackText();
     drawFeedback();
 
-    // Feature 2: Tutorial overlay (drawn on top)
     if (state.scene === 'phase1') {
       drawTutorial(ctx, state.tutorial, W, H);
     }
@@ -1178,14 +1129,23 @@ function render() {
   }
 
   drawFade();
+  drawFpsCounter(ctx, W);
 }
 
-function gameLoop(ts) {
-  state.lastTime = ts;
-  if (state.scene !== 'gameover') update();
+// ============================================================
+// GAME LOOP (delta-time based)
+// ============================================================
+function gameLoop(timestamp) {
+  updatePerfmon(timestamp);
+
+  // Calculate delta time (clamped to prevent spiral of death)
+  const rawDt = state.lastTimestamp > 0 ? (timestamp - state.lastTimestamp) / TARGET_FRAME_MS : 1;
+  const dt = Math.min(rawDt, 3); // Cap at 3x (20fps equivalent)
+  state.lastTimestamp = timestamp;
+
+  if (state.scene !== 'gameover') update(dt);
   render();
   requestAnimationFrame(gameLoop);
 }
-
 
 requestAnimationFrame(gameLoop);
