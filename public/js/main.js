@@ -245,6 +245,9 @@ function drawQuestionBanner() {
 // HUD
 // ============================================================
 function drawHUD() {
+  const isPhase3 = state.scene === 'phase3';
+
+  // Hearts (show in all phases)
   for (let i = 0; i < MAX_LIVES; i++) {
     const hx = 22 + i * 36;
     const hy = 90;
@@ -256,10 +259,14 @@ function drawHUD() {
     drawCanvasHeart(ctx, 0, 0, 12, i < state.lives ? '#E74C3C' : '#555', i < state.lives ? '#C0392B' : '#333');
     ctx.restore();
   }
-  drawText(ctx, String(state.score), W - 50, 88, 34, TEXT_WHITE);
+
+  // Score — only in phase 1 (phase 3 has balance instead)
+  if (!isPhase3) {
+    drawText(ctx, String(state.score), W - 50, 88, 34, TEXT_WHITE);
+  }
 
   // Phase counter
-  const phaseNum = state.scene === 'phase3' ? 3 : state.scene === 'phase2' ? 2 : 1;
+  const phaseNum = isPhase3 ? 3 : state.scene === 'phase2' ? 2 : 1;
   drawText(ctx, `Fase ${phaseNum}/3`, W - 55, 42, 14, 'rgba(255,255,255,0.7)', 'center', false);
 }
 
