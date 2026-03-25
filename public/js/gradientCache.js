@@ -1,5 +1,5 @@
 // ============================================================
-// GRADIENT & OFFSCREEN CANVAS CACHE
+// GRADIENT & OFFSCREEN CANVAS CACHE (OPTIMIZED)
 // ============================================================
 // Caches expensive gradient fills and static elements into
 // offscreen canvases. Regenerated only on resize.
@@ -10,14 +10,22 @@ let groundCanvasDay = null;
 let groundCanvasNight = null;
 let pipeGreenCanvas = null;
 let pipeGoldCanvas = null;
+let pipeCapGreenCanvas = null;
+let pipeCapGoldCanvas = null;
 let cachedWidth = 0;
 let cachedHeight = 0;
 let cachedGroundHeight = 0;
 
-// Bird body gradients cached as small offscreen canvases
-let birdBodyNormal = null;
-let birdBodyHurt = null;
-let birdBodyPhase3 = null;
+// Bird sprite caches (offscreen canvases for each wing frame)
+const birdSprites = {
+  normal: [null, null, null],   // 3 wing frames
+  hurt: [null, null, null],
+  phase3: [null, null, null],
+};
+
+// Coin offscreen (avoids radial gradient per frame)
+let coinCanvas = null;
+let coinCanvasLow = null;
 
 function createOffscreen(w, h) {
   const c = document.createElement('canvas');
@@ -69,7 +77,6 @@ export function ensureCaches(W, H, groundHeight) {
   gGradDay.addColorStop(1, '#B89A3D');
   gdCtx.fillStyle = gGradDay;
   gdCtx.fillRect(0, 0, 1, groundHeight);
-  // Grass strip
   const grassGradDay = gdCtx.createLinearGradient(0, 0, 0, 12);
   grassGradDay.addColorStop(0, '#4CAF50');
   grassGradDay.addColorStop(0.5, '#388E3C');
@@ -93,10 +100,14 @@ export function ensureCaches(W, H, groundHeight) {
   gnCtx.fillStyle = grassGradNight;
   gnCtx.fillRect(0, 0, 1, 12);
 
-  // === Pipe gradient strips (width = typical pipe width, height = 1) ===
-  // These are 1px tall strips we stretch vertically
+  // === Pipe gradient strips ===
   cachePipeStrip('green');
   cachePipeStrip('gold');
+  cachePipeCapStrip('green');
+  cachePipeCapStrip('gold');
+
+  // === Coin cache ===
+  cacheCoin();
 }
 
 function cachePipeStrip(type) {
@@ -126,6 +137,79 @@ function cachePipeStrip(type) {
   }
 }
 
+function cachePipeCapStrip(type) {
+  const isGold = type === 'gold';
+  const w = 120;
+  const c = createOffscreen(w, 1);
+  const ctx = c.getContext('2d');
+
+  const mid = isGold ? '#FFD700' : '#73BF2E';
+  const light = isGold ? '#FFE44D' : '#8BC34A';
+  const dark = isGold ? '#DAA520' : '#558B2F';
+  const edgeStart = isGold ? '#997A1A' : '#3E7B1E';
+  const edgeEnd = isGold ? '#806515' : '#2D5E15';
+
+  const capGrad = ctx.createLinearGradient(0, 0, w, 0);
+  capGrad.addColorStop(0, edgeStart);
+  capGrad.addColorStop(0.15, mid);
+  capGrad.addColorStop(0.4, light);
+  capGrad.addColorStop(0.85, dark);
+  capGrad.addColorStop(1, edgeEnd);
+  ctx.fillStyle = capGrad;
+  ctx.fillRect(0, 0, w, 1);
+
+  if (isGold) {
+    pipeCapGoldCanvas = c;
+  } else {
+    pipeCapGreenCanvas = c;
+  }
+}
+
+function cacheCoin() {
+  const r = 10; // COIN_RADIUS
+  const size = (r + 2) * 2;
+
+  // High quality coin with gradient
+  coinCanvas = createOffscreen(size, size);
+  const ctx = coinCanvas.getContext('2d');
+  const cx = size / 2;
+  const cy = size / 2;
+
+  const coinGrad = ctx.createRadialGradient(cx - 2, cy - 2, 1, cx, cy, r);
+  coinGrad.addColorStop(0, '#FFF176');
+  coinGrad.addColorStop(0.6, '#FFD700');
+  coinGrad.addColorStop(1, '#DAA520');
+  ctx.fillStyle = coinGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#B8860B';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.fillStyle = '#8B6914';
+  ctx.font = 'bold 11px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('$', cx, cy + 0.5);
+
+  // Low quality coin (flat)
+  coinCanvasLow = createOffscreen(size, size);
+  const ctxLow = coinCanvasLow.getContext('2d');
+  ctxLow.fillStyle = '#FFD700';
+  ctxLow.beginPath();
+  ctxLow.arc(cx, cy, r, 0, Math.PI * 2);
+  ctxLow.fill();
+  ctxLow.strokeStyle = '#B8860B';
+  ctxLow.lineWidth = 1.5;
+  ctxLow.stroke();
+  ctxLow.fillStyle = '#8B6914';
+  ctxLow.font = 'bold 11px Arial';
+  ctxLow.textAlign = 'center';
+  ctxLow.textBaseline = 'middle';
+  ctxLow.fillText('$', cx, cy + 0.5);
+}
+
 export function getSkyCanvas(isPhase3) {
   return isPhase3 ? skyCanvasNight : skyCanvasDay;
 }
@@ -136,4 +220,12 @@ export function getGroundCanvas(isPhase3) {
 
 export function getPipeCanvas(golden) {
   return golden ? pipeGoldCanvas : pipeGreenCanvas;
+}
+
+export function getPipeCapCanvas(golden) {
+  return golden ? pipeCapGoldCanvas : pipeCapGreenCanvas;
+}
+
+export function getCoinCanvas(lowQuality) {
+  return lowQuality ? coinCanvasLow : coinCanvas;
 }

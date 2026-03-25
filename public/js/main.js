@@ -10,8 +10,8 @@ import { drawProgressBar } from './progressBar.js';
 import { getHighScore, saveHighScore } from './leaderboard.js';
 import { shareWithImage } from './shareCard.js';
 import { createBalanceAnimState, updateBalanceAnim, drawAnimatedBalance } from './balanceAnim.js';
-import { updatePerfmon, drawFpsCounter, getQualityLevel } from './perfmon.js';
-import { invalidateCache } from './gradientCache.js';
+import { updatePerfmon, drawFpsCounter, getQualityLevel, getShouldSkipRender } from './perfmon.js';
+import { invalidateCache, getCoinCanvas } from './gradientCache.js';
 
 // ============================================================
 // CONFIG
@@ -33,6 +33,7 @@ const WRONG_COLOR = '#F44336';
 const COIN_RADIUS = 10;
 const COIN_POINTS = 5;
 const COIN_COLLECT_RADIUS = 28;
+const COIN_COLLECT_SQ = COIN_COLLECT_RADIUS * COIN_COLLECT_RADIUS;
 const COMBO_THRESHOLDS = [
   { streak: 7, multiplier: 5, label: 'x5' },
   { streak: 5, multiplier: 3, label: 'x3' },
@@ -208,7 +209,7 @@ function drawFade() {
 // QUESTION DISPLAY
 // ============================================================
 function drawQuestionBanner() {
-  const nextGate = state.gates.find(g => !g.scored);
+  const nextGate = findNextUnscored();
   const q = nextGate ? getGateQuestion(nextGate) : null;
   if (!q) return;
 
@@ -339,8 +340,29 @@ function checkGateCollision(gate) {
 }
 
 function getComboMultiplier(streak) {
-  for (const t of COMBO_THRESHOLDS) {
-    if (streak >= t.streak) return t;
+  for (let i = 0; i < COMBO_THRESHOLDS.length; i++) {
+    if (streak >= COMBO_THRESHOLDS[i].streak) return COMBO_THRESHOLDS[i];
+  }
+  return null;
+}
+
+function allGatesScored() {
+  for (let i = 0; i < state.gates.length; i++) {
+    if (!state.gates[i].scored) return false;
+  }
+  return true;
+}
+
+function findNextUnscored() {
+  for (let i = 0; i < state.gates.length; i++) {
+    if (!state.gates[i].scored) return state.gates[i];
+  }
+  return null;
+}
+
+function findNextUnpassed() {
+  for (let i = 0; i < state.gates.length; i++) {
+    if (!state.gates[i].passed) return state.gates[i];
   }
   return null;
 }
@@ -527,7 +549,7 @@ function handlePhase2GatePass(gate) {
 }
 
 function drawPhase2QuestionBanner() {
-  const nextGate = state.gates.find(g => !g.scored);
+  const nextGate = findNextUnscored();
   const q = nextGate ? getPhase2Question(nextGate) : null;
   if (!q) return;
 
@@ -562,7 +584,7 @@ function startPhase3() {
   state.showingFeedback = false;
   state.hurtTimer = 0;
   state.shakeTimer = 0;
-  state.balanceAnim = { ...createBalanceAnimState() };
+  state.balanceAnim = createBalanceAnimState();
   clearTrail();
   resetBird();
   startFadeIn();
@@ -590,7 +612,7 @@ function drawPhase3HUD() {
   drawAnimatedBalance(ctx, state.balanceAnim, W);
 
   // News hint below balance — BIG and readable
-  const next = state.gates.find(g => !g.passed);
+  const next = findNextUnpassed();
   if (next?.scenario) {
     drawRoundRect(ctx, 10, 56, W - 20, 56, 12, 'rgba(0,0,0,0.8)');
     drawText(ctx, next.scenario.hint, W / 2, 74, 16, TEXT_WHITE);
@@ -830,7 +852,8 @@ function update(dt) {
     }
 
     // Heart pickups
-    for (const h of state.hearts) {
+    for (let hi = 0; hi < state.hearts.length; hi++) {
+      const h = state.hearts[hi];
       if (h.collected) continue;
       h.x -= SCROLL_SPEED * dt;
       const dx = state.bird.x - h.x;
@@ -848,16 +871,22 @@ function update(dt) {
         }
       }
     }
-    state.hearts = state.hearts.filter(h => !h.collected && h.x > -30);
+    // In-place removal (no new array allocation)
+    for (let i = state.hearts.length - 1; i >= 0; i--) {
+      if (state.hearts[i].collected || state.hearts[i].x <= -30) {
+        state.hearts[i] = state.hearts[state.hearts.length - 1];
+        state.hearts.pop();
+      }
+    }
 
     // Coin pickups (squared distance check — no sqrt)
-    const coinCollectSq = COIN_COLLECT_RADIUS * COIN_COLLECT_RADIUS;
-    for (const c of state.coins) {
+    for (let ci = 0; ci < state.coins.length; ci++) {
+      const c = state.coins[ci];
       if (c.collected) continue;
       c.x -= SCROLL_SPEED * dt;
       const dx = state.bird.x - c.x;
       const dy = state.bird.y - c.y;
-      if (dx * dx + dy * dy < coinCollectSq) {
+      if (dx * dx + dy * dy < COIN_COLLECT_SQ) {
         c.collected = true;
         state.score += COIN_POINTS;
         emitCoinParticles(c.x, c.y);
@@ -865,7 +894,13 @@ function update(dt) {
         playCoin();
       }
     }
-    state.coins = state.coins.filter(c => !c.collected && c.x > -30);
+    // In-place removal (no new array allocation)
+    for (let i = state.coins.length - 1; i >= 0; i--) {
+      if (state.coins[i].collected || state.coins[i].x <= -30) {
+        state.coins[i] = state.coins[state.coins.length - 1];
+        state.coins.pop();
+      }
+    }
 
     // Combo trail
     updateTrail(state.bird.x, state.bird.y);
@@ -874,10 +909,16 @@ function update(dt) {
     }
 
     const scrollDelta = SCROLL_SPEED * dt;
-    for (const g of state.gates) g.x -= scrollDelta;
-    state.gates = state.gates.filter(g => g.x > -GATE_WIDTH - 30);
+    for (let gi = 0; gi < state.gates.length; gi++) state.gates[gi].x -= scrollDelta;
+    // In-place removal of off-screen gates (preserve order for gameplay logic)
+    for (let i = state.gates.length - 1; i >= 0; i--) {
+      if (state.gates[i].x <= -GATE_WIDTH - 30) {
+        state.gates.splice(i, 1);
+      }
+    }
 
-    for (const g of state.gates) {
+    for (let gi = 0; gi < state.gates.length; gi++) {
+      const g = state.gates[gi];
       if (!g.scored && !state.invincible && checkGateCollision(g)) {
         if (state.scene === 'phase3') {
           // Phase 3: no lives, just bounce and skip gate
@@ -913,7 +954,7 @@ function update(dt) {
     if (state.scene === 'phase1') {
       const last = state.gates[state.gates.length - 1];
       const allSpawned = state.nextSpawnIndex >= phase1Questions.length;
-      const allDone = state.gates.length === 0 || state.gates.every(g => g.scored);
+      const allDone = state.gates.length === 0 || allGatesScored();
 
       if (!last || last.x < W - GATE_SPACING) {
         if (!allSpawned) spawnGate();
@@ -939,7 +980,7 @@ function update(dt) {
     if (state.scene === 'phase2') {
       const last = state.gates[state.gates.length - 1];
       const allSpawned = state.nextSpawnIndex >= phase2Questions.length;
-      const allDone = state.gates.length === 0 || state.gates.every(g => g.scored);
+      const allDone = state.gates.length === 0 || allGatesScored();
 
       if (!last || last.x < W - GATE_SPACING) {
         if (!allSpawned) spawnPhase2Gate();
@@ -1007,9 +1048,13 @@ function render() {
   // Countdown scene
   if (state.scene === 'countdown') {
     drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset, getCurrentPhase());
-    for (const g of state.gates) {
-      const resolvedGate = { ...g, question: g.isPhase2 ? getPhase2Question(g) : getGateQuestion(g) };
-      drawGate(ctx, resolvedGate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
+    for (let gi = 0; gi < state.gates.length; gi++) {
+      const g = state.gates[gi];
+      // Resolve question in-place (temporary, no allocation)
+      const origQ = g.question;
+      g.question = g.isPhase2 ? getPhase2Question(g) : getGateQuestion(g);
+      drawGate(ctx, g, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
+      g.question = origQ;
     }
     drawBird(ctx, state.bird, state.hurtTimer, H - GROUND_HEIGHT, getCurrentPhase());
     drawHUD();
@@ -1042,13 +1087,18 @@ function render() {
 
     drawParallaxBackground(ctx, W, H, GROUND_HEIGHT, state.groundOffset, getCurrentPhase());
 
-    for (const g of state.gates) {
-      const resolvedGate = { ...g, question: g.isPhase2 ? getPhase2Question(g) : getGateQuestion(g) };
-      drawGate(ctx, resolvedGate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
+    for (let gi = 0; gi < state.gates.length; gi++) {
+      const g = state.gates[gi];
+      // Resolve question in-place (temporary, no allocation)
+      const origQ = g.question;
+      g.question = g.isPhase2 ? getPhase2Question(g) : getGateQuestion(g);
+      drawGate(ctx, g, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
+      g.question = origQ;
     }
 
     // Hearts
-    for (const h of state.hearts) {
+    for (let hi = 0; hi < state.hearts.length; hi++) {
+      const h = state.hearts[hi];
       if (!h.collected) {
         const bobY = Math.sin(state.frameCount * 0.04 + h.seed) * 5;
         const ps = 1 + Math.sin(state.frameCount * 0.06 + h.seed) * 0.08;
@@ -1064,51 +1114,32 @@ function render() {
       }
     }
 
-    // Coins
+    // Coins — use cached offscreen canvas
     const quality = getQualityLevel();
-    for (const c of state.coins) {
+    const coinCvs = getCoinCanvas(quality === 'low');
+    const coinSize = coinCvs ? coinCvs.width : COIN_RADIUS * 2 + 4;
+    const coinHalf = coinSize / 2;
+    for (let ci = 0; ci < state.coins.length; ci++) {
+      const c = state.coins[ci];
       if (c.collected) continue;
       const bobY = Math.sin(state.frameCount * 0.06 + c.seed) * 3;
       const sparkle = 0.7 + Math.sin(state.frameCount * 0.08 + c.seed * 2) * 0.3;
-      ctx.save();
-      ctx.translate(c.x, c.y + bobY);
 
       // Glow (skip on low)
       if (quality !== 'low') {
         ctx.globalAlpha = 0.2 * sparkle;
         ctx.fillStyle = '#FFD700';
         ctx.beginPath();
-        ctx.arc(0, 0, COIN_RADIUS * 1.6, 0, Math.PI * 2);
+        ctx.arc(c.x, c.y + bobY, COIN_RADIUS * 1.6, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // Coin body
+      // Coin body from cached canvas
       ctx.globalAlpha = sparkle;
-      if (quality === 'low') {
-        ctx.fillStyle = '#FFD700';
-      } else {
-        const coinGrad = ctx.createRadialGradient(-2, -2, 1, 0, 0, COIN_RADIUS);
-        coinGrad.addColorStop(0, '#FFF176');
-        coinGrad.addColorStop(0.6, '#FFD700');
-        coinGrad.addColorStop(1, '#DAA520');
-        ctx.fillStyle = coinGrad;
+      if (coinCvs) {
+        ctx.drawImage(coinCvs, c.x - coinHalf, c.y + bobY - coinHalf);
       }
-      ctx.beginPath();
-      ctx.arc(0, 0, COIN_RADIUS, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#B8860B';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // "$" symbol
       ctx.globalAlpha = 1;
-      ctx.fillStyle = '#8B6914';
-      ctx.font = 'bold 11px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('$', 0, 0.5);
-
-      ctx.restore();
     }
 
     // Bird trail
@@ -1172,7 +1203,10 @@ function gameLoop(timestamp) {
   state.lastTimestamp = timestamp;
 
   if (state.scene !== 'gameover') update(dt);
-  render();
+  // Frame throttle: skip render on low-end devices for consistent framerate
+  if (!getShouldSkipRender()) {
+    render();
+  }
   requestAnimationFrame(gameLoop);
 }
 

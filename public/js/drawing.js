@@ -1,8 +1,10 @@
 // ============================================================
-// DRAWING HELPERS & BIRD/GATE RENDERING (OPTIMIZED)
+// DRAWING HELPERS & BIRD/GATE RENDERING (OPTIMIZED v2)
 // ============================================================
+// Uses offscreen canvas caches for pipes instead of per-frame gradients
 
 import { getQualityLevel } from './perfmon.js';
+import { getPipeCanvas, getPipeCapCanvas } from './gradientCache.js';
 
 const TEXT_SHADOW = 'rgba(0,0,0,0.5)';
 const TEXT_WHITE = '#FFFFFF';
@@ -23,36 +25,52 @@ const BIRD_BLUE_DARK = '#0288D1';
 const BIRD_SIZE = 28;
 
 // ============================================================
-// TRAIL SYSTEM — stores last N positions
+// TRAIL SYSTEM — stores last N positions (reuses objects)
 // ============================================================
 const TRAIL_MAX = 10;
 const trailPositions = [];
 
+// Pre-allocate trail position objects
+for (let i = 0; i < TRAIL_MAX; i++) {
+  trailPositions.push({ x: 0, y: 0, active: false });
+}
+let trailCount = 0;
+
 export function updateTrail(x, y) {
-  trailPositions.unshift({ x, y });
-  if (trailPositions.length > TRAIL_MAX) {
-    trailPositions.length = TRAIL_MAX;
+  // Shift positions down (move data, not objects)
+  for (let i = Math.min(trailCount, TRAIL_MAX - 1); i > 0; i--) {
+    trailPositions[i].x = trailPositions[i - 1].x;
+    trailPositions[i].y = trailPositions[i - 1].y;
+    trailPositions[i].active = true;
   }
+  trailPositions[0].x = x;
+  trailPositions[0].y = y;
+  trailPositions[0].active = true;
+  if (trailCount < TRAIL_MAX) trailCount++;
 }
 
 export function clearTrail() {
-  trailPositions.length = 0;
+  for (let i = 0; i < TRAIL_MAX; i++) {
+    trailPositions[i].active = false;
+  }
+  trailCount = 0;
 }
 
 export function drawBirdTrail(ctx, comboActive) {
   const quality = getQualityLevel();
   if (quality === 'low') return; // skip trail on low-end
 
-  for (let i = 1; i < trailPositions.length; i++) {
+  for (let i = 1; i < trailCount; i++) {
     const pos = trailPositions[i];
-    const t = i / trailPositions.length;
+    if (!pos.active) break;
+    const t = i / trailCount;
     const alpha = 0.4 * (1 - t);
     const radius = BIRD_SIZE * 0.35 * (1 - t * 0.7);
     ctx.globalAlpha = alpha;
     if (comboActive) {
-      const r = Math.floor(255 - t * 50);
-      const g = Math.floor(140 - t * 100);
-      ctx.fillStyle = `rgb(${r},${g},0)`;
+      const r = 255 - (t * 50) | 0;
+      const g = 140 - (t * 100) | 0;
+      ctx.fillStyle = 'rgb(' + r + ',' + g + ',0)';
     } else {
       ctx.fillStyle = '#F7DC6F';
     }
@@ -70,8 +88,10 @@ const WING_FRAMES = [
   { angle: 0.2, yOff: 4 },
 ];
 
-export function drawText(ctx, text, x, y, size, color, align = 'center', stroke = true) {
-  ctx.font = `bold ${size}px Arial, sans-serif`;
+export function drawText(ctx, text, x, y, size, color, align, stroke) {
+  if (align === undefined) align = 'center';
+  if (stroke === undefined) stroke = true;
+  ctx.font = 'bold ' + size + 'px Arial, sans-serif';
   ctx.textAlign = align;
   ctx.textBaseline = 'middle';
   if (stroke) {
@@ -95,12 +115,15 @@ export function drawRoundRect(ctx, x, y, w, h, r, fill, stroke) {
 // BIRD (optimized: fewer save/restore, flat colors on low-end)
 // ============================================================
 export function drawBird(ctx, bird, hurtTimer, groundY, phase) {
-  const { x, y, rotation, wingIndex } = bird;
+  const x = bird.x;
+  const y = bird.y;
+  const rotation = bird.rotation;
+  const wingIndex = bird.wingIndex;
   const isPhase3 = phase === 3;
   const isPhase2 = phase === 2;
   const quality = getQualityLevel();
 
-  if (hurtTimer > 0 && Math.floor(hurtTimer / 3) % 2 === 0) {
+  if (hurtTimer > 0 && ((hurtTimer / 3 | 0) % 2 === 0)) {
     return;
   }
 
@@ -174,9 +197,7 @@ export function drawBird(ctx, bird, hurtTimer, groundY, phase) {
     ctx.fill();
   }
 
-  // Wing with 3-frame animation — use setTransform trick to avoid nested save/restore
-  const cosR = Math.cos(wing.angle);
-  const sinR = Math.sin(wing.angle);
+  // Wing
   ctx.save();
   ctx.translate(-4, 2);
   ctx.rotate(wing.angle);
@@ -297,32 +318,32 @@ function drawTie(ctx) {
 }
 
 // ============================================================
-// PIPE SECTIONS (use cached pipe gradient when available)
+// PIPE SECTIONS — uses cached offscreen canvas strips
 // ============================================================
-function drawPipeSection(ctx, x, y, w, h, golden = false) {
+function drawPipeSection(ctx, x, y, w, h, golden) {
+  if (golden === undefined) golden = false;
   if (h <= 0) return;
   const border = golden ? PIPE_GOLD_BORDER : PIPE_BORDER;
-
   const quality = getQualityLevel();
+
   if (quality === 'low') {
     // Flat color on low quality
     ctx.fillStyle = golden ? PIPE_GOLD : PIPE_GREEN;
     ctx.fillRect(x, y, w, h);
   } else {
-    // Use per-frame gradient (still needed for varying x positions)
-    const dark = golden ? PIPE_GOLD_DARK : PIPE_GREEN_DARK;
-    const light = golden ? PIPE_GOLD_LIGHT : PIPE_GREEN_LIGHT;
-    const mid = golden ? PIPE_GOLD : PIPE_GREEN;
-    const edge = golden ? '#997A1A' : '#3E7B1E';
-
-    const pipeGrad = ctx.createLinearGradient(x, 0, x + w, 0);
-    pipeGrad.addColorStop(0, dark);
-    pipeGrad.addColorStop(0.15, light);
-    pipeGrad.addColorStop(0.4, mid);
-    pipeGrad.addColorStop(0.85, dark);
-    pipeGrad.addColorStop(1, edge);
-    ctx.fillStyle = pipeGrad;
-    ctx.fillRect(x, y, w, h);
+    // Use cached pipe strip — stretch from 1px tall strip
+    const pipeCanvas = getPipeCanvas(golden);
+    if (pipeCanvas) {
+      // Source: the strip is 120px wide, take the portion matching our pipe width
+      // We center the gradient on the pipe
+      const srcW = pipeCanvas.width;
+      const srcOffset = Math.max(0, (srcW - w) / 2);
+      ctx.drawImage(pipeCanvas, srcOffset, 0, w, 1, x, y, w, h);
+    } else {
+      // Fallback: flat color
+      ctx.fillStyle = golden ? PIPE_GOLD : PIPE_GREEN;
+      ctx.fillRect(x, y, w, h);
+    }
 
     // Highlights
     ctx.fillStyle = 'rgba(255,255,255,0.15)';
@@ -336,7 +357,8 @@ function drawPipeSection(ctx, x, y, w, h, golden = false) {
   ctx.strokeRect(x, y, w, h);
 }
 
-function drawPipeCap(ctx, x, y, w, h, golden = false) {
+function drawPipeCap(ctx, x, y, w, h, golden) {
+  if (golden === undefined) golden = false;
   const border = golden ? PIPE_GOLD_BORDER : PIPE_BORDER;
   const quality = getQualityLevel();
 
@@ -344,20 +366,15 @@ function drawPipeCap(ctx, x, y, w, h, golden = false) {
     ctx.fillStyle = golden ? PIPE_GOLD_LIGHT : PIPE_GREEN_LIGHT;
     ctx.fillRect(x, y, w, h);
   } else {
-    const mid = golden ? PIPE_GOLD : PIPE_GREEN;
-    const light = golden ? PIPE_GOLD_LIGHT : PIPE_GREEN_LIGHT;
-    const dark = golden ? PIPE_GOLD_DARK : PIPE_GREEN_DARK;
-    const edgeStart = golden ? '#997A1A' : '#3E7B1E';
-    const edgeEnd = golden ? '#806515' : '#2D5E15';
-
-    const capGrad = ctx.createLinearGradient(x, 0, x + w, 0);
-    capGrad.addColorStop(0, edgeStart);
-    capGrad.addColorStop(0.15, mid);
-    capGrad.addColorStop(0.4, light);
-    capGrad.addColorStop(0.85, dark);
-    capGrad.addColorStop(1, edgeEnd);
-    ctx.fillStyle = capGrad;
-    ctx.fillRect(x, y, w, h);
+    const capCanvas = getPipeCapCanvas(golden);
+    if (capCanvas) {
+      const srcW = capCanvas.width;
+      const srcOffset = Math.max(0, (srcW - w) / 2);
+      ctx.drawImage(capCanvas, srcOffset, 0, w, 1, x, y, w, h);
+    } else {
+      ctx.fillStyle = golden ? PIPE_GOLD_LIGHT : PIPE_GREEN_LIGHT;
+      ctx.fillRect(x, y, w, h);
+    }
   }
 
   ctx.strokeStyle = border;
@@ -369,7 +386,11 @@ function drawPipeCap(ctx, x, y, w, h, golden = false) {
 // GATE
 // ============================================================
 export function drawGate(ctx, gate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS) {
-  const { x, topPassageY, question, passed, result } = gate;
+  const gx = gate.x;
+  const topPassageY = gate.topPassageY;
+  const question = gate.question;
+  const passed = gate.passed;
+  const result = gate.result;
   const golden = gate.golden || false;
   const capH = 10;
   const capExtra = 12;
@@ -382,31 +403,31 @@ export function drawGate(ctx, gate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT
     const groundY = H - GROUND_HEIGHT;
 
     if (gapTop > 0) {
-      drawPipeSection(ctx, x, 0, GATE_WIDTH, gapTop - capH, true);
-      drawPipeCap(ctx, x - capExtra / 2, gapTop - capH, GATE_WIDTH + capExtra, capH, true);
+      drawPipeSection(ctx, gx, 0, GATE_WIDTH, gapTop - capH, true);
+      drawPipeCap(ctx, gx - capExtra / 2, gapTop - capH, GATE_WIDTH + capExtra, capH, true);
     }
 
     if (gapBottom < groundY) {
-      drawPipeCap(ctx, x - capExtra / 2, gapBottom, GATE_WIDTH + capExtra, capH, true);
-      drawPipeSection(ctx, x, gapBottom + capH, GATE_WIDTH, groundY - gapBottom - capH, true);
+      drawPipeCap(ctx, gx - capExtra / 2, gapBottom, GATE_WIDTH + capExtra, capH, true);
+      drawPipeSection(ctx, gx, gapBottom + capH, GATE_WIDTH, groundY - gapBottom - capH, true);
     }
 
     if (!passed) {
       ctx.fillStyle = 'rgba(255,215,0,0.08)';
-      ctx.fillRect(x, gapTop, GATE_WIDTH, gapBottom - gapTop);
+      ctx.fillRect(gx, gapTop, GATE_WIDTH, gapBottom - gapTop);
 
       ctx.globalAlpha = 0.6 + Math.sin(Date.now() * 0.004) * 0.3;
       ctx.font = 'bold 20px Arial';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#FFD700';
-      ctx.fillText('\u2B50', x + GATE_WIDTH / 2, gapCenter);
+      ctx.fillText('\u2B50', gx + GATE_WIDTH / 2, gapCenter);
       ctx.globalAlpha = 1;
     }
 
     if (question && !passed) {
       const halfGap = (gapBottom - gapTop) / 2;
-      drawAnswerBadge(ctx, x, gapTop, GATE_WIDTH, halfGap, 'A', question.a);
-      drawAnswerBadge(ctx, x, gapTop + halfGap, GATE_WIDTH, halfGap, 'B', question.b);
+      drawAnswerBadge(ctx, gx, gapTop, GATE_WIDTH, halfGap, 'A', question.a);
+      drawAnswerBadge(ctx, gx, gapTop + halfGap, GATE_WIDTH, halfGap, 'B', question.b);
     }
 
     if (result) {
@@ -414,7 +435,7 @@ export function drawGate(ctx, gate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT
       const passageY = result.chose === 'a' ? gapTop : gapTop + gapHalfH;
       const color = result.correct ? 'rgba(76,175,80,0.4)' : 'rgba(244,67,54,0.4)';
       ctx.fillStyle = color;
-      ctx.fillRect(x, passageY, GATE_WIDTH, gapHalfH);
+      ctx.fillRect(gx, passageY, GATE_WIDTH, gapHalfH);
     }
     return;
   }
@@ -427,33 +448,33 @@ export function drawGate(ctx, gate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT
   const groundY = H - GROUND_HEIGHT;
 
   if (topWallBottom > 0) {
-    drawPipeSection(ctx, x, 0, GATE_WIDTH, topWallBottom - capH);
-    drawPipeCap(ctx, x - capExtra / 2, topWallBottom - capH, GATE_WIDTH + capExtra, capH);
+    drawPipeSection(ctx, gx, 0, GATE_WIDTH, topWallBottom - capH);
+    drawPipeCap(ctx, gx - capExtra / 2, topWallBottom - capH, GATE_WIDTH + capExtra, capH);
   }
 
-  drawPipeCap(ctx, x - capExtra / 2, midWallTop, GATE_WIDTH + capExtra, capH);
-  drawPipeSection(ctx, x, midWallTop + capH, GATE_WIDTH, WALL_THICKNESS - capH * 2);
-  drawPipeCap(ctx, x - capExtra / 2, midWallBottom - capH, GATE_WIDTH + capExtra, capH);
+  drawPipeCap(ctx, gx - capExtra / 2, midWallTop, GATE_WIDTH + capExtra, capH);
+  drawPipeSection(ctx, gx, midWallTop + capH, GATE_WIDTH, WALL_THICKNESS - capH * 2);
+  drawPipeCap(ctx, gx - capExtra / 2, midWallBottom - capH, GATE_WIDTH + capExtra, capH);
 
   if (botPassageBottom < groundY) {
-    drawPipeCap(ctx, x - capExtra / 2, botPassageBottom, GATE_WIDTH + capExtra, capH);
-    drawPipeSection(ctx, x, botPassageBottom + capH, GATE_WIDTH, groundY - botPassageBottom - capH);
+    drawPipeCap(ctx, gx - capExtra / 2, botPassageBottom, GATE_WIDTH + capExtra, capH);
+    drawPipeSection(ctx, gx, botPassageBottom + capH, GATE_WIDTH, groundY - botPassageBottom - capH);
   }
 
   if (question && !passed) {
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
-    ctx.fillRect(x, topPassageY, GATE_WIDTH, PASSAGE_HEIGHT);
-    ctx.fillRect(x, midWallBottom, GATE_WIDTH, PASSAGE_HEIGHT);
+    ctx.fillRect(gx, topPassageY, GATE_WIDTH, PASSAGE_HEIGHT);
+    ctx.fillRect(gx, midWallBottom, GATE_WIDTH, PASSAGE_HEIGHT);
 
-    drawAnswerBadge(ctx, x, topPassageY, GATE_WIDTH, PASSAGE_HEIGHT, 'A', question.a);
-    drawAnswerBadge(ctx, x, midWallBottom, GATE_WIDTH, PASSAGE_HEIGHT, 'B', question.b);
+    drawAnswerBadge(ctx, gx, topPassageY, GATE_WIDTH, PASSAGE_HEIGHT, 'A', question.a);
+    drawAnswerBadge(ctx, gx, midWallBottom, GATE_WIDTH, PASSAGE_HEIGHT, 'B', question.b);
   }
 
   if (result) {
     const passageY = result.chose === 'a' ? topPassageY : midWallBottom;
     const color = result.correct ? 'rgba(76,175,80,0.4)' : 'rgba(244,67,54,0.4)';
     ctx.fillStyle = color;
-    ctx.fillRect(x, passageY, GATE_WIDTH, PASSAGE_HEIGHT);
+    ctx.fillRect(gx, passageY, GATE_WIDTH, PASSAGE_HEIGHT);
   }
 }
 
@@ -501,11 +522,11 @@ function drawAnswerBadge(ctx, gx, passageY, gateW, passageH, letter, text) {
 
   const maxTextW = pillW - 40;
   let fontSize = Math.min(18, Math.max(10, maxTextW / (text.length * 0.45)));
-  let font = `bold ${fontSize}px Arial, sans-serif`;
+  let font = 'bold ' + fontSize + 'px Arial, sans-serif';
   let measured = getCachedTextWidth(ctx, text, font);
   while (measured > maxTextW && fontSize > 8) {
     fontSize -= 1;
-    font = `bold ${fontSize}px Arial, sans-serif`;
+    font = 'bold ' + fontSize + 'px Arial, sans-serif';
     measured = getCachedTextWidth(ctx, text, font);
   }
   drawText(ctx, text, cx + 8, cy, fontSize, TEXT_WHITE, 'center', true);

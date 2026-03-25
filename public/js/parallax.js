@@ -1,7 +1,8 @@
 // ============================================================
-// PARALLAX BACKGROUND — Flappy Bird style (OPTIMIZED)
+// PARALLAX BACKGROUND — Flappy Bird style (OPTIMIZED v2)
 // ============================================================
-// Cached gradients via offscreen canvas, quality-aware rendering
+// Offscreen canvas caches for hills, trees, bushes.
+// Rebuilt only on resize. Scrolled via drawImage offset.
 
 import { ensureCaches, getSkyCanvas, getGroundCanvas } from './gradientCache.js';
 import { getQualityLevel } from './perfmon.js';
@@ -23,6 +24,203 @@ const BG_OBJECTS_P3 = [
 
 let bgFrameCount = 0;
 
+// === OFFSCREEN CACHES FOR HILLS/TREES/BUSHES ===
+let hillCacheFarDay = null;
+let hillCacheNearDay = null;
+let hillCacheFarNight = null;
+let hillCacheNearNight = null;
+let hillCacheSimpleDay = null;
+let hillCacheSimpleNight = null;
+let treeCacheDay = null;
+let treeCacheNight = null;
+let bushCacheDay = null;
+let bushCacheNight = null;
+
+// Offscreen strip widths (2x screen width for seamless scrolling)
+let stripW = 0;
+let cacheScreenW = 0;
+let cacheGroundY = 0;
+
+function createOffscreen(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil(w));
+  c.height = Math.max(1, Math.ceil(h));
+  return c;
+}
+
+function rebuildParallaxCaches(W, groundY) {
+  if (W === cacheScreenW && groundY === cacheGroundY) return;
+  cacheScreenW = W;
+  cacheGroundY = groundY;
+  stripW = W * 2;
+
+  // Far hills (day)
+  hillCacheFarDay = buildHillStrip(stripW, groundY, {
+    color1: 'rgba(120,160,130,0.4)',
+    color2: 'rgba(100,145,115,0.25)',
+    baseHeight: 60, amplitude: 35, frequency: 0.004, yOffset: 0,
+  });
+  // Near hills (day)
+  hillCacheNearDay = buildHillStrip(stripW, groundY, {
+    color1: 'rgba(80,130,80,0.45)',
+    color2: 'rgba(60,110,60,0.3)',
+    baseHeight: 40, amplitude: 25, frequency: 0.006, yOffset: 10,
+  });
+  // Far hills (night)
+  hillCacheFarNight = buildHillStrip(stripW, groundY, {
+    color1: 'rgba(60,40,80,0.5)',
+    color2: 'rgba(40,25,60,0.35)',
+    baseHeight: 60, amplitude: 35, frequency: 0.004, yOffset: 0,
+  });
+  // Near hills (night)
+  hillCacheNearNight = buildHillStrip(stripW, groundY, {
+    color1: 'rgba(40,30,60,0.55)',
+    color2: 'rgba(25,18,40,0.4)',
+    baseHeight: 40, amplitude: 25, frequency: 0.006, yOffset: 10,
+  });
+  // Simple hills (low quality)
+  hillCacheSimpleDay = buildSimpleHillStrip(stripW, groundY, false);
+  hillCacheSimpleNight = buildSimpleHillStrip(stripW, groundY, true);
+
+  // Trees
+  treeCacheDay = buildTreeStrip(stripW, groundY, false);
+  treeCacheNight = buildTreeStrip(stripW, groundY, true);
+
+  // Bushes
+  bushCacheDay = buildBushStrip(stripW, groundY, false);
+  bushCacheNight = buildBushStrip(stripW, groundY, true);
+}
+
+function buildHillStrip(w, groundY, opts) {
+  const { color1, color2, baseHeight, amplitude, frequency, yOffset } = opts;
+  const h = baseHeight + amplitude * 2 + 20;
+  const c = createOffscreen(w, h);
+  const ctx = c.getContext('2d');
+  const step = 6;
+
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+
+  for (let x = 0; x <= w; x += step) {
+    const worldX = x;
+    const hillH = baseHeight
+      + Math.sin(worldX * frequency) * amplitude
+      + Math.sin(worldX * frequency * 2.3 + 1.5) * amplitude * 0.4
+      + Math.sin(worldX * frequency * 0.7 + 3.0) * amplitude * 0.6;
+    ctx.lineTo(x, h - hillH);
+  }
+
+  ctx.lineTo(w, h + 10);
+  ctx.lineTo(0, h + 10);
+  ctx.closePath();
+
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, color1);
+  grad.addColorStop(1, color2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Store metadata
+  c._hillHeight = h;
+  c._yOffset = yOffset;
+  return c;
+}
+
+function buildSimpleHillStrip(w, groundY, isPhase3) {
+  const h = 80;
+  const c = createOffscreen(w, h);
+  const ctx = c.getContext('2d');
+
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  for (let x = 0; x <= w; x += 12) {
+    const hillH = 40 + Math.sin(x * 0.005) * 30;
+    ctx.lineTo(x, h - hillH);
+  }
+  ctx.lineTo(w, h + 10);
+  ctx.lineTo(0, h + 10);
+  ctx.closePath();
+  ctx.fillStyle = isPhase3 ? 'rgba(40,30,60,0.5)' : 'rgba(80,130,80,0.4)';
+  ctx.fill();
+
+  c._hillHeight = h;
+  return c;
+}
+
+function buildTreeStrip(w, groundY, isPhase3) {
+  const h = 60;
+  const c = createOffscreen(w, h);
+  const ctx = c.getContext('2d');
+
+  const spacing = 55;
+  const trunkColor = isPhase3 ? '#4E342E' : '#6D4C41';
+  const canopyColor = isPhase3 ? '#2E4A3E' : '#4CAF50';
+
+  for (let i = 0; i < Math.ceil(w / spacing) + 1; i++) {
+    const tx = i * spacing;
+    const seed = ((i * 7919) % 1000) / 1000;
+    const treeH = 28 + seed * 20;
+    const canopyW = 12 + seed * 8;
+
+    // Trunk
+    ctx.fillStyle = trunkColor;
+    ctx.fillRect(tx - 2.5, h - treeH * 0.35, 5, treeH * 0.35);
+
+    // Canopy (flat color for offscreen, no radial gradient needed)
+    ctx.fillStyle = canopyColor;
+    ctx.beginPath();
+    ctx.ellipse(tx, h - treeH * 0.55, canopyW, treeH * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  c._stripSpacing = spacing;
+  c._stripH = h;
+  return c;
+}
+
+function buildBushStrip(w, groundY, isPhase3) {
+  const h = 20;
+  const c = createOffscreen(w, h);
+  const ctx = c.getContext('2d');
+
+  const spacing = 40;
+  const bushColor = isPhase3 ? '#3E5E4A' : '#5B8C2A';
+
+  for (let i = 0; i < Math.ceil(w / spacing) + 1; i++) {
+    const bx = i * spacing + 15;
+    const seed = ((i * 6271) % 1000) / 1000;
+    const r = 8 + seed * 7;
+
+    ctx.fillStyle = bushColor;
+    ctx.beginPath();
+    ctx.ellipse(bx, h - r * 0.25, r, r * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  c._stripH = h;
+  return c;
+}
+
+// Draw a cached strip with parallax scrolling
+function drawCachedStrip(ctx, strip, W, groundY, offset) {
+  if (!strip) return;
+  const h = strip._hillHeight || strip._stripH;
+  const yOffset = strip._yOffset || 0;
+  const drawY = groundY - h + yOffset;
+
+  // Wrap offset within strip width
+  const wrappedOffset = ((offset % stripW) + stripW) % stripW;
+
+  // Draw two segments for seamless scrolling
+  const firstW = Math.min(W, stripW - wrappedOffset);
+  ctx.drawImage(strip, wrappedOffset, 0, firstW, strip.height, 0, drawY, firstW, strip.height);
+
+  if (firstW < W) {
+    const secondW = W - firstW;
+    ctx.drawImage(strip, 0, 0, secondW, strip.height, firstW, drawY, secondW, strip.height);
+  }
+}
+
 export function drawParallaxBackground(ctx, W, H, groundHeight, groundOffset, phase) {
   const groundY = H - groundHeight;
   const isPhase3 = phase === 3;
@@ -31,6 +229,9 @@ export function drawParallaxBackground(ctx, W, H, groundHeight, groundOffset, ph
 
   // Ensure gradient caches are ready
   ensureCaches(W, H, groundHeight);
+
+  // Rebuild parallax strip caches on resize
+  rebuildParallaxCaches(W, groundY);
 
   // === Sky gradient (cached 1px-wide strip, stretched) ===
   const skyCanvas = getSkyCanvas(isPhase3);
@@ -53,44 +254,27 @@ export function drawParallaxBackground(ctx, W, H, groundHeight, groundOffset, ph
     drawClouds(ctx, W, groundOffset * 0.15, quality);
   }
 
-  // === Hills ===
+  // === Hills (from cached offscreen strips) ===
   if (quality !== 'low') {
-    // Far hills (0.2x speed)
-    const farHillColor1 = isPhase3 ? 'rgba(60,40,80,0.5)' : 'rgba(120,160,130,0.4)';
-    const farHillColor2 = isPhase3 ? 'rgba(40,25,60,0.35)' : 'rgba(100,145,115,0.25)';
-    drawHills(ctx, W, groundY, groundOffset * 0.2, {
-      color1: farHillColor1,
-      color2: farHillColor2,
-      baseHeight: 60,
-      amplitude: 35,
-      frequency: 0.004,
-      yOffset: 0,
-    });
-
-    // Near hills (0.4x speed)
-    const nearHillColor1 = isPhase3 ? 'rgba(40,30,60,0.55)' : 'rgba(80,130,80,0.45)';
-    const nearHillColor2 = isPhase3 ? 'rgba(25,18,40,0.4)' : 'rgba(60,110,60,0.3)';
-    drawHills(ctx, W, groundY, groundOffset * 0.4, {
-      color1: nearHillColor1,
-      color2: nearHillColor2,
-      baseHeight: 40,
-      amplitude: 25,
-      frequency: 0.006,
-      yOffset: 10,
-    });
+    const farHill = isPhase3 ? hillCacheFarNight : hillCacheFarDay;
+    const nearHill = isPhase3 ? hillCacheNearNight : hillCacheNearDay;
+    drawCachedStrip(ctx, farHill, W, groundY, groundOffset * 0.2);
+    drawCachedStrip(ctx, nearHill, W, groundY, groundOffset * 0.4);
   } else {
-    // Low quality: single simplified hill layer
-    drawHillsSimple(ctx, W, groundY, groundOffset * 0.3, isPhase3);
+    const simpleHill = isPhase3 ? hillCacheSimpleNight : hillCacheSimpleDay;
+    drawCachedStrip(ctx, simpleHill, W, groundY, groundOffset * 0.3);
   }
 
-  // === Trees (skip on low quality) ===
+  // === Trees (from cached offscreen strip, skip on low quality) ===
   if (quality !== 'low') {
-    drawTreeRow(ctx, W, groundY, groundOffset * 0.55, isPhase3, quality);
+    const treeStrip = isPhase3 ? treeCacheNight : treeCacheDay;
+    drawCachedStrip(ctx, treeStrip, W, groundY, groundOffset * 0.55);
   }
 
-  // === Bushes (skip on low quality) ===
+  // === Bushes (from cached offscreen strip, high quality only) ===
   if (quality === 'high') {
-    drawBushRow(ctx, W, groundY, groundOffset * 0.7, isPhase3);
+    const bushStrip = isPhase3 ? bushCacheNight : bushCacheDay;
+    drawCachedStrip(ctx, bushStrip, W, groundY, groundOffset * 0.7);
   }
 
   // === Ground ===
@@ -132,7 +316,8 @@ function drawBackgroundObjects(ctx, W, groundY, groundOffset, isPhase3) {
   const objects = isPhase3 ? BG_OBJECTS_P3 : BG_OBJECTS;
   const loopW = 1200;
 
-  for (const obj of objects) {
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
     const ox = ((obj.baseX - groundOffset * obj.speed) % loopW + loopW) % loopW;
     if (ox > W + 60) continue;
 
@@ -236,155 +421,33 @@ function drawBigStar(ctx, x, y) {
 // ============================================================
 function drawClouds(ctx, W, offset, quality) {
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
-  const clouds = [
-    { baseX: 100, y: 45, s: 0.9 },
-    { baseX: 350, y: 70, s: 0.7 },
-    { baseX: 550, y: 35, s: 1.0 },
-    { baseX: 800, y: 80, s: 0.6 },
-    { baseX: 1050, y: 50, s: 0.85 },
-  ];
   const loopW = 1200;
   const useSimple = quality === 'medium';
 
-  for (const c of clouds) {
-    const cx = ((c.baseX - offset % loopW) + loopW) % loopW - 80;
+  // Pre-defined cloud data (avoid object allocation)
+  const cloudBaseX = [100, 350, 550, 800, 1050];
+  const cloudY = [45, 70, 35, 80, 50];
+  const cloudS = [0.9, 0.7, 1.0, 0.6, 0.85];
+
+  for (let i = 0; i < 5; i++) {
+    const cx = ((cloudBaseX[i] - offset % loopW) + loopW) % loopW - 80;
     if (cx < -100 || cx > W + 100) continue;
 
-    const tx = cx;
-    const ty = c.y;
-    const s = c.s;
+    const s = cloudS[i];
+    const ty = cloudY[i];
 
     ctx.beginPath();
     if (useSimple) {
-      // 3 arcs instead of 5
-      ctx.arc(tx, ty, 24 * s, 0, Math.PI * 2);
-      ctx.arc(tx + 20 * s, ty - 8 * s, 20 * s, 0, Math.PI * 2);
-      ctx.arc(tx + 42 * s, ty - 2 * s, 22 * s, 0, Math.PI * 2);
+      ctx.arc(cx, ty, 24 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 20 * s, ty - 8 * s, 20 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 42 * s, ty - 2 * s, 22 * s, 0, Math.PI * 2);
     } else {
-      ctx.arc(tx, ty, 24 * s, 0, Math.PI * 2);
-      ctx.arc(tx + 20 * s, ty - 8 * s, 20 * s, 0, Math.PI * 2);
-      ctx.arc(tx + 42 * s, ty - 2 * s, 22 * s, 0, Math.PI * 2);
-      ctx.arc(tx + 16 * s, ty + 7 * s, 17 * s, 0, Math.PI * 2);
-      ctx.arc(tx + 34 * s, ty + 5 * s, 15 * s, 0, Math.PI * 2);
+      ctx.arc(cx, ty, 24 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 20 * s, ty - 8 * s, 20 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 42 * s, ty - 2 * s, 22 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 16 * s, ty + 7 * s, 17 * s, 0, Math.PI * 2);
+      ctx.arc(cx + 34 * s, ty + 5 * s, 15 * s, 0, Math.PI * 2);
     }
-    ctx.fill();
-  }
-}
-
-// ============================================================
-// HILLS — smooth sine-based (uses gradient per draw)
-// ============================================================
-function drawHills(ctx, W, groundY, offset, opts) {
-  const { color1, color2, baseHeight, amplitude, frequency, yOffset } = opts;
-  const step = 6; // coarser step than original 3
-
-  ctx.beginPath();
-  ctx.moveTo(0, groundY + yOffset);
-
-  for (let x = 0; x <= W; x += step) {
-    const worldX = x + offset;
-    const h = baseHeight
-      + Math.sin(worldX * frequency) * amplitude
-      + Math.sin(worldX * frequency * 2.3 + 1.5) * amplitude * 0.4
-      + Math.sin(worldX * frequency * 0.7 + 3.0) * amplitude * 0.6;
-    ctx.lineTo(x, groundY - h + yOffset);
-  }
-
-  ctx.lineTo(W, groundY + yOffset + 10);
-  ctx.lineTo(0, groundY + yOffset + 10);
-  ctx.closePath();
-
-  const grad = ctx.createLinearGradient(0, groundY - baseHeight - amplitude, 0, groundY + yOffset);
-  grad.addColorStop(0, color1);
-  grad.addColorStop(1, color2);
-  ctx.fillStyle = grad;
-  ctx.fill();
-}
-
-// Simplified single-color hills for low quality
-function drawHillsSimple(ctx, W, groundY, offset, isPhase3) {
-  ctx.beginPath();
-  ctx.moveTo(0, groundY);
-
-  for (let x = 0; x <= W; x += 12) {
-    const worldX = x + offset;
-    const h = 40 + Math.sin(worldX * 0.005) * 30;
-    ctx.lineTo(x, groundY - h);
-  }
-
-  ctx.lineTo(W, groundY + 10);
-  ctx.lineTo(0, groundY + 10);
-  ctx.closePath();
-  ctx.fillStyle = isPhase3 ? 'rgba(40,30,60,0.5)' : 'rgba(80,130,80,0.4)';
-  ctx.fill();
-}
-
-// ============================================================
-// TREES — skip gradient on medium, use flat color
-// ============================================================
-function drawTreeRow(ctx, W, groundY, offset, isPhase3, quality) {
-  const spacing = 55;
-  const loopW = spacing * 25;
-  const off = offset % loopW;
-
-  const trunkColor = isPhase3 ? '#4E342E' : '#6D4C41';
-  const canopyColor = isPhase3 ? '#2E4A3E' : '#4CAF50';
-  const useGradient = quality === 'high';
-
-  for (let i = 0; i < Math.ceil(W / spacing) + 3; i++) {
-    const baseX = i * spacing;
-    const tx = baseX - (off % spacing);
-    if (tx < -30 || tx > W + 30) continue;
-
-    const seed = ((Math.floor((baseX + off) / spacing) * 7919) % 1000) / 1000;
-    const h = 28 + seed * 20;
-    const canopyW = 12 + seed * 8;
-
-    // Trunk
-    ctx.fillStyle = trunkColor;
-    ctx.fillRect(tx - 2.5, groundY - h * 0.35, 5, h * 0.35);
-
-    // Canopy
-    if (useGradient) {
-      const cGrad = ctx.createRadialGradient(tx, groundY - h * 0.55, 2, tx, groundY - h * 0.5, canopyW);
-      if (isPhase3) {
-        cGrad.addColorStop(0, '#2E4A3E');
-        cGrad.addColorStop(1, '#1B3A2A');
-      } else {
-        cGrad.addColorStop(0, '#66BB6A');
-        cGrad.addColorStop(1, '#2E7D32');
-      }
-      ctx.fillStyle = cGrad;
-    } else {
-      ctx.fillStyle = canopyColor;
-    }
-    ctx.beginPath();
-    ctx.ellipse(tx, groundY - h * 0.55, canopyW, h * 0.4, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-// ============================================================
-// BUSHES — small green ellipses near ground
-// ============================================================
-function drawBushRow(ctx, W, groundY, offset, isPhase3) {
-  const spacing = 40;
-  const loopW = spacing * 30;
-  const off = offset % loopW;
-  const bushColor = isPhase3 ? '#3E5E4A' : '#5B8C2A';
-
-  for (let i = 0; i < Math.ceil(W / spacing) + 3; i++) {
-    const baseX = i * spacing + 15;
-    const bx = baseX - (off % spacing);
-    if (bx < -20 || bx > W + 20) continue;
-
-    const seed = ((Math.floor((baseX + off) / spacing) * 6271) % 1000) / 1000;
-    const r = 8 + seed * 7;
-
-    // Use flat color instead of radial gradient
-    ctx.fillStyle = bushColor;
-    ctx.beginPath();
-    ctx.ellipse(bx, groundY - r * 0.25, r, r * 0.55, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 }

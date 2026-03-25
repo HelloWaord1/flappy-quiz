@@ -1,6 +1,7 @@
 // ============================================================
 // TUTORIAL OVERLAY — shown before first gates (first game only)
 // ============================================================
+// OPTIMIZED: mutable state to avoid per-frame object creation
 
 import { drawText, drawRoundRect } from './drawing.js';
 
@@ -8,7 +9,10 @@ const TUTORIAL_TIMEOUT_FRAMES = 180; // 3 seconds at 60fps
 const LOCALSTORAGE_KEY = 'flappy-quiz-played';
 
 export function createTutorialState() {
-  const hasPlayedBefore = localStorage.getItem(LOCALSTORAGE_KEY) === 'true';
+  let hasPlayedBefore = false;
+  try {
+    hasPlayedBefore = localStorage.getItem(LOCALSTORAGE_KEY) === 'true';
+  } catch (_e) { /* noop */ }
   return {
     visible: false,
     timer: 0,
@@ -18,31 +22,27 @@ export function createTutorialState() {
 
 export function showTutorial(tutorialState) {
   if (tutorialState.hasPlayedBefore) return tutorialState;
-  return {
-    ...tutorialState,
-    visible: true,
-    timer: TUTORIAL_TIMEOUT_FRAMES,
-  };
+  tutorialState.visible = true;
+  tutorialState.timer = TUTORIAL_TIMEOUT_FRAMES;
+  return tutorialState;
 }
 
 export function dismissTutorial(tutorialState) {
   if (!tutorialState.visible) return tutorialState;
   try { localStorage.setItem(LOCALSTORAGE_KEY, 'true'); } catch (_e) { /* noop */ }
-  return {
-    ...tutorialState,
-    visible: false,
-    timer: 0,
-    hasPlayedBefore: true,
-  };
+  tutorialState.visible = false;
+  tutorialState.timer = 0;
+  tutorialState.hasPlayedBefore = true;
+  return tutorialState;
 }
 
 export function updateTutorial(tutorialState) {
   if (!tutorialState.visible) return tutorialState;
-  const newTimer = tutorialState.timer - 1;
-  if (newTimer <= 0) {
+  tutorialState.timer -= 1;
+  if (tutorialState.timer <= 0) {
     return dismissTutorial(tutorialState);
   }
-  return { ...tutorialState, timer: newTimer };
+  return tutorialState;
 }
 
 export function drawTutorial(ctx, tutorialState, W, H) {

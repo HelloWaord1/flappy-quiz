@@ -1,11 +1,13 @@
 // ============================================================
 // COUNTDOWN 3-2-1-GO! before game start
 // ============================================================
+// OPTIMIZED: mutable state to avoid per-frame object creation
 
 import { drawText } from './drawing.js';
 
 const COUNTDOWN_STEP_MS = 700;
 const COUNTDOWN_STEPS = ['3', '2', '1', 'GO!'];
+const STEP_FRAMES = COUNTDOWN_STEP_MS / (1000 / 60); // ~42 frames per step
 
 export function createCountdownState() {
   return {
@@ -17,35 +19,34 @@ export function createCountdownState() {
 }
 
 export function startCountdown(countdownState) {
-  return {
-    ...countdownState,
-    active: true,
-    step: 0,
-    timer: COUNTDOWN_STEP_MS / (1000 / 60), // frames at 60fps (~42 frames per step)
-    scale: 2.0,
-  };
+  countdownState.active = true;
+  countdownState.step = 0;
+  countdownState.timer = STEP_FRAMES;
+  countdownState.scale = 2.0;
+  return countdownState;
 }
 
 export function updateCountdown(countdownState) {
   if (!countdownState.active) return countdownState;
 
-  const newTimer = countdownState.timer - 1;
-  const newScale = Math.max(0.8, countdownState.scale - 0.03);
+  countdownState.timer -= 1;
+  countdownState.scale = Math.max(0.8, countdownState.scale - 0.03);
 
-  if (newTimer <= 0) {
+  if (countdownState.timer <= 0) {
     const nextStep = countdownState.step + 1;
     if (nextStep >= COUNTDOWN_STEPS.length) {
-      return { ...countdownState, active: false, step: 0, timer: 0, scale: 1 };
+      countdownState.active = false;
+      countdownState.step = 0;
+      countdownState.timer = 0;
+      countdownState.scale = 1;
+      return countdownState;
     }
-    return {
-      ...countdownState,
-      step: nextStep,
-      timer: COUNTDOWN_STEP_MS / (1000 / 60),
-      scale: 2.0,
-    };
+    countdownState.step = nextStep;
+    countdownState.timer = STEP_FRAMES;
+    countdownState.scale = 2.0;
   }
 
-  return { ...countdownState, timer: newTimer, scale: newScale };
+  return countdownState;
 }
 
 export function drawCountdown(ctx, countdownState, W, H) {
