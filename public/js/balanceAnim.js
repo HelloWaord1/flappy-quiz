@@ -38,12 +38,12 @@ export function updateBalanceAnim(animState, realBalance) {
 }
 
 export function drawAnimatedBalance(ctx, animState, W) {
-  drawRoundRect(ctx, W / 2 - 75, 75, 150, 36, 10, 'rgba(0,0,0,0.6)');
+  drawRoundRect(ctx, W / 2 - 75, 10, 150, 36, 10, 'rgba(0,0,0,0.6)');
 
   let color = '#FFFFFF';
   if (animState.direction > 0) color = '#4CAF50';
   else if (animState.direction < 0) color = '#F44336';
 
   const displayVal = Math.round(animState.displayBalance);
-  drawText(ctx, `$${displayVal.toLocaleString()}`, W / 2, 93, 18, color);
+  drawText(ctx, `$${displayVal.toLocaleString()}`, W / 2, 28, 20, color);
 }

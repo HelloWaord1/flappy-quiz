@@ -236,23 +236,21 @@ function drawQuestionBanner() {
 function drawHUD() {
   const isPhase3 = state.scene === 'phase3';
 
-  for (let i = 0; i < MAX_LIVES; i++) {
-    const hx = 22 + i * 36;
-    const hy = 28;
-    const pulse = state.heartPulse[i] || 0;
-    const s = 1 + pulse * 0.3;
-    ctx.save();
-    ctx.translate(hx, hy);
-    ctx.scale(s, s);
-    drawCanvasHeart(ctx, 0, 0, 12, i < state.lives ? '#E74C3C' : '#555', i < state.lives ? '#C0392B' : '#333');
-    ctx.restore();
-  }
-
+  // No hearts in phase 3 — infinite mode, no lives
   if (!isPhase3) {
+    for (let i = 0; i < MAX_LIVES; i++) {
+      const hx = 22 + i * 36;
+      const hy = 28;
+      const pulse = state.heartPulse[i] || 0;
+      const s = 1 + pulse * 0.3;
+      ctx.save();
+      ctx.translate(hx, hy);
+      ctx.scale(s, s);
+      drawCanvasHeart(ctx, 0, 0, 12, i < state.lives ? '#E74C3C' : '#555', i < state.lives ? '#C0392B' : '#333');
+      ctx.restore();
+    }
     drawText(ctx, String(state.score), W - 50, 28, 30, TEXT_WHITE);
   }
-
-  // Phase label removed — looked like debug log
 }
 
 // ============================================================
@@ -560,33 +558,43 @@ function startPhase3() {
   state.p3TradeCount = 0;
   state.gates = [];
   state.coins = [];
+  state.hearts = [];
   state.showingFeedback = false;
+  state.hurtTimer = 0;
+  state.shakeTimer = 0;
   state.balanceAnim = { ...createBalanceAnimState() };
   clearTrail();
   resetBird();
   startFadeIn();
+  spawnTradeGate();
+}
 
-  for (let i = 0; i < phase3Scenarios.length; i++) {
-    const totalH = PASSAGE_HEIGHT * 2 + WALL_THICKNESS;
-    const minTop = 80;
-    const maxTop = H - GROUND_HEIGHT - totalH - 40;
-    state.gates.push({
-      x: W + 120 + i * GATE_SPACING,
-      topPassageY: minTop + Math.random() * Math.max(maxTop - minTop, 0),
-      scenario: phase3Scenarios[i],
-      question: { a: '\uD83D\uDCC8 BUY', b: '\uD83D\uDCC9 SELL', correct: phase3Scenarios[i].direction === 'up' ? 'a' : 'b' },
-      passed: false, scored: false, result: null,
-    });
-  }
+function spawnTradeGate() {
+  const scenario = phase3Scenarios[state.p3TradeCount % phase3Scenarios.length];
+  const totalH = PASSAGE_HEIGHT * 2 + WALL_THICKNESS;
+  const minTop = 80;
+  const maxTop = H - GROUND_HEIGHT - totalH - 40;
+  const lastGate = state.gates[state.gates.length - 1];
+  const startX = lastGate ? Math.max(W + 80, lastGate.x + GATE_SPACING) : W + 120;
+  state.gates.push({
+    x: startX,
+    topPassageY: minTop + Math.random() * Math.max(maxTop - minTop, 0),
+    scenario,
+    question: { a: '\uD83D\uDCC8 BUY', b: '\uD83D\uDCC9 SELL', correct: scenario.direction === 'up' ? 'a' : 'b' },
+    passed: false, scored: false, result: null,
+  });
 }
 
 function drawPhase3HUD() {
+  // Balance at top
   drawAnimatedBalance(ctx, state.balanceAnim, W);
+
+  // News hint below balance
   const next = state.gates.find(g => !g.passed);
   if (next?.scenario) {
-    drawRoundRect(ctx, 12, 12, W - 24, 50, 12, 'rgba(0,0,0,0.7)');
-    drawText(ctx, next.scenario.hint, W / 2, 30, 12, TEXT_WHITE);
-    drawText(ctx, '\u2B06\uFE0F BUY (cima)  \u2B07\uFE0F SELL (baixo)', W / 2, 48, 11, '#aaa');
+    drawRoundRect(ctx, 12, 62, W - 24, 44, 10, 'rgba(0,0,0,0.7)');
+    drawText(ctx, next.scenario.hint, W / 2, 76, 12, TEXT_WHITE);
+    drawText(ctx, '\u2B06\uFE0F BUY (cima)  \u2B07\uFE0F SELL (baixo)', W / 2, 94, 10, '#aaa');
   }
 }
 
@@ -605,20 +613,20 @@ function handleTradePass(gate) {
   if (correct) {
     const gain = 100 + Math.floor(Math.random() * 200);
     state.balance += gain;
-    state.score += 15;
     state.feedbackCorrect = true;
     state.flashColor = 'rgb(76,175,80)';
     emitCorrectParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, `+$${gain}`, '#4CAF50', 22);
     playCorrect();
   } else {
-    const loss = 50 + Math.floor(Math.random() * 100);
+    const loss = 30 + Math.floor(Math.random() * 70);
     state.balance = Math.max(0, state.balance - loss);
     state.feedbackCorrect = false;
     state.flashColor = 'rgb(244,67,54)';
     emitWrongParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, `-$${loss}`, '#F44336', 22);
     playWrong();
+    // No life loss in phase 3 — infinite mode
   }
 
   state.showingFeedback = true;
@@ -626,7 +634,8 @@ function handleTradePass(gate) {
   state.flashAlpha = 0.3;
   state.p3TradeCount++;
 
-  if (state.p3TradeCount >= phase3Scenarios.length) {
+  // Transition to lead form when balance reaches $2000+
+  if (state.balance >= 2000) {
     setTimeout(() => startFadeOut(() => { state.scene = 'leadform'; showLeadForm(); }), 1200);
   }
 }
@@ -870,6 +879,18 @@ function update(dt) {
 
     for (const g of state.gates) {
       if (!g.scored && !state.invincible && checkGateCollision(g)) {
+        if (state.scene === 'phase3') {
+          // Phase 3: no lives, just bounce and skip gate
+          state.flashAlpha = 0.3;
+          state.flashColor = 'rgb(244,67,54)';
+          state.bird.vel = JUMP_FORCE * 0.5;
+          state.invincible = true;
+          state.invincibleTimer = 30;
+          state.hurtTimer = 20;
+          g.scored = true;
+          g.passed = true;
+          break;
+        }
         state.lives--;
         state.flashAlpha = 0.5;
         state.flashColor = 'rgb(244,67,54)';
@@ -935,6 +956,14 @@ function update(dt) {
             state._transitionNext = () => { startPhase3(); startFadeIn(); };
           });
         }
+      }
+    }
+
+    // Phase 3: infinite trade gates — spawn new ones as needed
+    if (state.scene === 'phase3' && state.balance < 2000) {
+      const last = state.gates[state.gates.length - 1];
+      if (!last || last.x < W - GATE_SPACING) {
+        spawnTradeGate();
       }
     }
   }
