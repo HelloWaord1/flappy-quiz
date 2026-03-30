@@ -48,7 +48,7 @@ router.post('/batch', (req, res) => {
 
     // Ensure session exists
     if (batch.session_info) {
-      insertSession.run({
+      insertSession({
         id: batch.session_id,
         device_type: batch.session_info.device_type || null,
         screen_width: batch.session_info.screen_width || null,
@@ -76,7 +76,7 @@ router.post('/batch', (req, res) => {
 
     // Update aggregates
     if (batch.aggregates) {
-      updateSessionAggregates.run({
+      updateSessionAggregates({
         id: batch.session_id,
         ...batch.aggregates,
       });
@@ -85,10 +85,10 @@ router.post('/batch', (req, res) => {
     // Check for lead submission or session end events
     for (const e of batch.events) {
       if (e.event_type === 'lead_submitted') {
-        markLeadSubmitted.run({ id: batch.session_id });
+        markLeadSubmitted(batch.session_id);
       }
       if (e.event_type === 'session_end') {
-        endSession.run({
+        endSession({
           id: batch.session_id,
           duration_sec: e.sec_since_start,
           drop_phase: e.phase || null,

@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { initDb } from './db.js';
 import leadsRouter from './routes/leads.js';
 import eventsRouter from './routes/events.js';
 import adminRouter from './routes/admin.js';
@@ -26,4 +27,10 @@ app.get('/admin', (req, res) => {
   res.sendFile(join(__dirname, '..', 'public', 'admin.html'));
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Init DB then start server
+initDb().then(() => {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}).catch(err => {
+  console.error('DB init failed:', err);
+  process.exit(1);
+});
