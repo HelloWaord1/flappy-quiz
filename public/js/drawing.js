@@ -4,7 +4,7 @@
 // Uses offscreen canvas caches for pipes instead of per-frame gradients
 
 import { getQualityLevel } from './perfmon.js';
-import { getPipeCanvas, getPipeCapCanvas } from './gradientCache.js';
+import { getPipeCanvas, getPipeCapCanvas, getBirdSprite } from './gradientCache.js';
 
 const TEXT_SHADOW = 'rgba(0,0,0,0.5)';
 const TEXT_WHITE = '#FFFFFF';
@@ -23,6 +23,19 @@ const BIRD_BLUE = '#4FC3F7';
 const BIRD_BLUE_LIGHT = '#B3E5FC';
 const BIRD_BLUE_DARK = '#0288D1';
 const BIRD_SIZE = 28;
+
+// Font string cache — avoids per-frame string concatenation
+const fontCache = new Map();
+function getCachedFont(size) {
+  if (fontCache.has(size)) return fontCache.get(size);
+  const font = 'bold ' + size + 'px Arial, sans-serif';
+  fontCache.set(size, font);
+  if (fontCache.size > 50) {
+    const first = fontCache.keys().next().value;
+    fontCache.delete(first);
+  }
+  return font;
+}
 
 // ============================================================
 // TRAIL SYSTEM — stores last N positions (reuses objects)
@@ -56,9 +69,19 @@ export function clearTrail() {
   trailCount = 0;
 }
 
+// Pre-computed combo trail colors for each of 10 trail positions
+const comboTrailColors = [];
+const normalTrailColor = '#F7DC6F';
+for (let i = 0; i < TRAIL_MAX; i++) {
+  const t = i / TRAIL_MAX;
+  const r = 255 - (t * 50) | 0;
+  const g = 140 - (t * 100) | 0;
+  comboTrailColors.push('rgb(' + r + ',' + g + ',0)');
+}
+
 export function drawBirdTrail(ctx, comboActive) {
   const quality = getQualityLevel();
-  if (quality === 'low') return; // skip trail on low-end
+  if (quality === 'low') return;
 
   for (let i = 1; i < trailCount; i++) {
     const pos = trailPositions[i];
@@ -67,13 +90,7 @@ export function drawBirdTrail(ctx, comboActive) {
     const alpha = 0.4 * (1 - t);
     const radius = BIRD_SIZE * 0.35 * (1 - t * 0.7);
     ctx.globalAlpha = alpha;
-    if (comboActive) {
-      const r = 255 - (t * 50) | 0;
-      const g = 140 - (t * 100) | 0;
-      ctx.fillStyle = 'rgb(' + r + ',' + g + ',0)';
-    } else {
-      ctx.fillStyle = '#F7DC6F';
-    }
+    ctx.fillStyle = comboActive ? comboTrailColors[i] : normalTrailColor;
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
     ctx.fill();
@@ -91,7 +108,7 @@ const WING_FRAMES = [
 export function drawText(ctx, text, x, y, size, color, align, stroke) {
   if (align === undefined) align = 'center';
   if (stroke === undefined) stroke = true;
-  ctx.font = 'bold ' + size + 'px Arial, sans-serif';
+  ctx.font = getCachedFont(size);
   ctx.textAlign = align;
   ctx.textBaseline = 'middle';
   if (stroke) {
@@ -112,7 +129,7 @@ export function drawRoundRect(ctx, x, y, w, h, r, fill, stroke) {
 }
 
 // ============================================================
-// BIRD (optimized: fewer save/restore, flat colors on low-end)
+// BIRD (optimized: offscreen sprite cache, no per-frame gradients)
 // ============================================================
 export function drawBird(ctx, bird, hurtTimer, groundY, phase) {
   const x = bird.x;
@@ -120,7 +137,6 @@ export function drawBird(ctx, bird, hurtTimer, groundY, phase) {
   const rotation = bird.rotation;
   const wingIndex = bird.wingIndex;
   const isPhase3 = phase === 3;
-  const isPhase2 = phase === 2;
   const quality = getQualityLevel();
 
   if (hurtTimer > 0 && ((hurtTimer / 3 | 0) % 2 === 0)) {
@@ -136,91 +152,54 @@ export function drawBird(ctx, bird, hurtTimer, groundY, phase) {
     const shadowHeight = shadowWidth * 0.3;
     const shadowAlpha = 0.25 * (1 - shadowScale * 0.7);
     ctx.globalAlpha = shadowAlpha;
-    ctx.fillStyle = 'rgba(0,0,0,1)';
+    ctx.fillStyle = '#000';
     ctx.beginPath();
     ctx.ellipse(x, groundY - 2, shadowWidth, shadowHeight, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
   }
 
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(rotation);
+  // Use cached bird sprite — eliminates all per-frame gradient creation
+  const variant = hurtTimer > 0 ? 'hurt' : isPhase3 ? 'phase3' : phase === 2 ? 'phase2' : 'normal';
+  const sprite = getBirdSprite(variant, wingIndex);
 
+  if (sprite) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    // Sprite is drawn centered — offset by half its size
+    ctx.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
+    ctx.restore();
+  } else {
+    // Fallback: draw inline (should not happen after first frame)
+    drawBirdFallback(ctx, bird, hurtTimer, phase, quality);
+  }
+}
+
+// Fallback for first frame before sprites are cached
+function drawBirdFallback(ctx, bird, hurtTimer, phase, quality) {
+  const isPhase3 = phase === 3;
+  const wingIndex = bird.wingIndex;
   const wing = WING_FRAMES[wingIndex] || WING_FRAMES[1];
 
-  // Drop shadow (skip on low)
-  if (quality !== 'low') {
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-    ctx.beginPath();
-    ctx.ellipse(3, 3, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  ctx.save();
+  ctx.translate(bird.x, bird.y);
+  ctx.rotate(bird.rotation);
 
-  // Body — use flat color on low quality, gradient otherwise
-  if (quality === 'low') {
-    if (hurtTimer > 0) {
-      ctx.fillStyle = '#FF4444';
-    } else if (isPhase3) {
-      ctx.fillStyle = BIRD_BLUE;
-    } else {
-      ctx.fillStyle = BIRD_YELLOW;
-    }
-  } else {
-    const bodyGrad = ctx.createRadialGradient(-3, -3, 2, 0, 0, BIRD_SIZE / 2);
-    if (hurtTimer > 0) {
-      bodyGrad.addColorStop(0, '#FF9999');
-      bodyGrad.addColorStop(1, '#FF4444');
-    } else if (isPhase3) {
-      bodyGrad.addColorStop(0, BIRD_BLUE_LIGHT);
-      bodyGrad.addColorStop(0.7, BIRD_BLUE);
-      bodyGrad.addColorStop(1, BIRD_BLUE_DARK);
-    } else {
-      bodyGrad.addColorStop(0, '#FFF176');
-      bodyGrad.addColorStop(0.7, BIRD_YELLOW);
-      bodyGrad.addColorStop(1, '#E6C349');
-    }
-    ctx.fillStyle = bodyGrad;
-  }
+  // Body (flat)
+  ctx.fillStyle = hurtTimer > 0 ? '#FF4444' : isPhase3 ? BIRD_BLUE : BIRD_YELLOW;
   ctx.beginPath();
   ctx.ellipse(0, 0, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = isPhase3 ? BIRD_BLUE_DARK : BIRD_ORANGE;
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
 
-  // Belly highlight (skip on low)
-  if (quality !== 'low') {
-    ctx.fillStyle = 'rgba(255,255,255,0.25)';
-    ctx.beginPath();
-    ctx.ellipse(-2, -4, BIRD_SIZE / 3.5, BIRD_SIZE / 4, -0.2, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Wing
+  // Wing (flat)
   ctx.save();
   ctx.translate(-4, 2);
   ctx.rotate(wing.angle);
-
-  if (quality === 'low') {
-    ctx.fillStyle = isPhase3 ? '#29B6F6' : '#F0A830';
-  } else {
-    const wingGrad = ctx.createLinearGradient(0, wing.yOff - 6, 0, wing.yOff + 6);
-    if (isPhase3) {
-      wingGrad.addColorStop(0, '#29B6F6');
-      wingGrad.addColorStop(1, BIRD_BLUE_DARK);
-    } else {
-      wingGrad.addColorStop(0, '#F0A830');
-      wingGrad.addColorStop(1, BIRD_ORANGE);
-    }
-    ctx.fillStyle = wingGrad;
-  }
+  ctx.fillStyle = isPhase3 ? '#29B6F6' : '#F0A830';
   ctx.beginPath();
   ctx.ellipse(0, wing.yOff, 11, 7, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = isPhase3 ? '#0277BD' : '#D68910';
-  ctx.lineWidth = 1;
-  ctx.stroke();
   ctx.restore();
 
   // Eye
@@ -228,93 +207,19 @@ export function drawBird(ctx, bird, hurtTimer, groundY, phase) {
   ctx.beginPath();
   ctx.arc(8, -5, 7.5, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = '#444';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  // Pupil
   ctx.fillStyle = '#1a1a1a';
   ctx.beginPath();
   ctx.arc(10, -5, 3.5, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.beginPath();
-  ctx.arc(11.5, -6.5, 1.5, 0, Math.PI * 2);
-  ctx.fill();
 
-  // Phase 2: Glasses
-  if (isPhase2 && quality !== 'low') {
-    drawGlasses(ctx);
-  }
-
-  // Beak (two-tone)
+  // Beak
   ctx.fillStyle = '#E74C3C';
   ctx.beginPath();
-  ctx.moveTo(14, -1);
-  ctx.lineTo(25, 3);
-  ctx.lineTo(14, 4);
+  ctx.moveTo(14, -1); ctx.lineTo(25, 3); ctx.lineTo(14, 4);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = '#C0392B';
-  ctx.beginPath();
-  ctx.moveTo(14, 4);
-  ctx.lineTo(25, 3);
-  ctx.lineTo(14, 7);
-  ctx.closePath();
-  ctx.fill();
-
-  // Phase 3: Tie
-  if (isPhase3) {
-    drawTie(ctx);
-  }
 
   ctx.restore();
-}
-
-// ============================================================
-// BIRD ACCESSORIES
-// ============================================================
-function drawGlasses(ctx) {
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(8, -5, 9, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(-4, -4, 5.5, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(1, -5);
-  ctx.lineTo(-4 + 5.5, -4);
-  ctx.stroke();
-  ctx.globalAlpha = 0.15;
-  ctx.fillStyle = '#4444FF';
-  ctx.beginPath();
-  ctx.arc(8, -5, 8.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(-4, -4, 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-}
-
-function drawTie(ctx) {
-  ctx.fillStyle = '#D32F2F';
-  ctx.beginPath();
-  ctx.moveTo(12, 8);
-  ctx.lineTo(16, 8);
-  ctx.lineTo(14, 12);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = '#B71C1C';
-  ctx.beginPath();
-  ctx.moveTo(13, 12);
-  ctx.lineTo(15, 12);
-  ctx.lineTo(16, 20);
-  ctx.lineTo(14, 18);
-  ctx.lineTo(12, 20);
-  ctx.closePath();
-  ctx.fill();
 }
 
 // ============================================================
@@ -385,7 +290,7 @@ function drawPipeCap(ctx, x, y, w, h, golden) {
 // ============================================================
 // GATE
 // ============================================================
-export function drawGate(ctx, gate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS) {
+export function drawGate(ctx, gate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS, frameCount) {
   const gx = gate.x;
   const topPassageY = gate.topPassageY;
   const question = gate.question;
@@ -416,7 +321,7 @@ export function drawGate(ctx, gate, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT
       ctx.fillStyle = 'rgba(255,215,0,0.08)';
       ctx.fillRect(gx, gapTop, GATE_WIDTH, gapBottom - gapTop);
 
-      ctx.globalAlpha = 0.6 + Math.sin(Date.now() * 0.004) * 0.3;
+      ctx.globalAlpha = 0.6 + Math.sin((frameCount || 0) * 0.24) * 0.3;
       ctx.font = 'bold 20px Arial';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#FFD700';

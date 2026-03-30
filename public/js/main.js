@@ -202,8 +202,10 @@ function updateFade(dt) {
 
 function drawFade() {
   if (state.fadeAlpha <= 0) return;
-  ctx.fillStyle = `rgba(0,0,0,${state.fadeAlpha})`;
+  ctx.globalAlpha = state.fadeAlpha;
+  ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
 }
 
 // ============================================================
@@ -260,8 +262,10 @@ function drawHUD() {
 // ============================================================
 function drawFeedback() {
   if (state.flashAlpha <= 0) return;
-  ctx.fillStyle = state.flashColor.replace(')', `,${state.flashAlpha})`).replace('rgb', 'rgba');
+  ctx.globalAlpha = state.flashAlpha;
+  ctx.fillStyle = state.flashColor;
   ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
 }
 
 function drawFeedbackText() {
@@ -778,10 +782,8 @@ function drawMenu() {
   ctx.scale(btnPulse, btnPulse);
   ctx.translate(-W / 2, -btnCY);
   const btnY = H * 0.6;
-  const btnGrad = ctx.createLinearGradient(0, btnY, 0, btnY + 52);
-  btnGrad.addColorStop(0, '#FF8A50');
-  btnGrad.addColorStop(1, '#FF5722');
-  drawRoundRect(ctx, W / 2 - 80, btnY, 160, 52, 16, btnGrad);
+  // Use flat gradient approximation instead of per-frame gradient creation
+  drawRoundRect(ctx, W / 2 - 80, btnY, 160, 52, 16, '#FF6D38');
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -1054,7 +1056,7 @@ function render() {
       // Resolve question in-place (temporary, no allocation)
       const origQ = g.question;
       g.question = g.isPhase2 ? getPhase2Question(g) : getGateQuestion(g);
-      drawGate(ctx, g, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
+      drawGate(ctx, g, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS, state.frameCount);
       g.question = origQ;
     }
     drawBird(ctx, state.bird, state.hurtTimer, H - GROUND_HEIGHT, getCurrentPhase());
@@ -1093,26 +1095,25 @@ function render() {
       // Resolve question in-place (temporary, no allocation)
       const origQ = g.question;
       g.question = g.isPhase2 ? getPhase2Question(g) : getGateQuestion(g);
-      drawGate(ctx, g, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS);
+      drawGate(ctx, g, H, GROUND_HEIGHT, GATE_WIDTH, PASSAGE_HEIGHT, WALL_THICKNESS, state.frameCount);
       g.question = origQ;
     }
 
-    // Hearts
+    // Hearts (skip scale on low quality to avoid save/restore)
+    const heartQuality = getQualityLevel();
     for (let hi = 0; hi < state.hearts.length; hi++) {
       const h = state.hearts[hi];
-      if (!h.collected) {
-        const bobY = Math.sin(state.frameCount * 0.04 + h.seed) * 5;
-        const ps = 1 + Math.sin(state.frameCount * 0.06 + h.seed) * 0.08;
-        ctx.save();
-        ctx.translate(h.x, h.y + bobY);
-        ctx.scale(ps, ps);
+      if (h.collected) continue;
+      const bobY = Math.sin(state.frameCount * 0.04 + h.seed) * 5;
+      const hx = h.x;
+      const hy = h.y + bobY;
+      if (heartQuality !== 'low') {
         ctx.fillStyle = 'rgba(255,80,80,0.15)';
         ctx.beginPath();
-        ctx.arc(0, 0, HEART_SIZE, 0, Math.PI * 2);
+        ctx.arc(hx, hy, HEART_SIZE, 0, Math.PI * 2);
         ctx.fill();
-        drawCanvasHeart(ctx, 0, 0, HEART_SIZE * 0.6, '#FF4081', '#C2185B');
-        ctx.restore();
       }
+      drawCanvasHeart(ctx, hx, hy, HEART_SIZE * 0.6, '#FF4081', '#C2185B');
     }
 
     // Coins — use cached offscreen canvas

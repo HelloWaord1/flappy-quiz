@@ -50,18 +50,32 @@ export function updateFloatingTexts(dt) {
   }
 }
 
+// Font cache for floating texts
+const ftFontCache = new Map();
+function getFtFont(size) {
+  if (ftFontCache.has(size)) return ftFontCache.get(size);
+  const font = 'bold ' + size + 'px Arial, sans-serif';
+  ftFontCache.set(size, font);
+  if (ftFontCache.size > 30) {
+    const first = ftFontCache.keys().next().value;
+    ftFontCache.delete(first);
+  }
+  return font;
+}
+
 export function drawFloatingTexts(ctx) {
+  if (floatingTexts.length === 0) return;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
   for (let i = 0; i < floatingTexts.length; i++) {
     const ft = floatingTexts[i];
     const alpha = Math.max(0, ft.life / ft.maxLife);
     const scale = 0.8 + 0.4 * (1 - alpha);
     ctx.globalAlpha = alpha;
-    ctx.font = `bold ${Math.round(ft.size * scale)}px Arial, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-    ctx.lineWidth = 3;
-    ctx.lineJoin = 'round';
+    ctx.font = getFtFont(Math.round(ft.size * scale));
     ctx.strokeText(ft.text, ft.x, ft.y);
     ctx.fillStyle = ft.color;
     ctx.fillText(ft.text, ft.x, ft.y);

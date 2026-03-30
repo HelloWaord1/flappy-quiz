@@ -190,34 +190,58 @@ function drawHeart(ctx, cx, cy, size, rotation) {
 }
 
 export function drawParticles(ctx) {
+  if (particles.length === 0) return;
+
+  // Batch: circles first (no save/restore needed)
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
+    if (p.shape !== 'circle') continue;
     const alpha = Math.max(0, p.life / p.maxLife);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-    if (p.shape === 'star') {
-      drawStar(ctx, p.x, p.y, p.size, p.rotation);
-    } else if (p.shape === 'heart') {
-      drawHeart(ctx, p.x, p.y, p.size, p.rotation);
-    } else if (p.shape === 'confetti') {
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rotation);
+  // Batch: stars (uses save/restore but grouped)
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    if (p.shape !== 'star') continue;
+    const alpha = Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    drawStar(ctx, p.x, p.y, p.size, p.rotation);
+  }
+
+  // Batch: hearts
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    if (p.shape !== 'heart') continue;
+    const alpha = Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    drawHeart(ctx, p.x, p.y, p.size, p.rotation);
+  }
+
+  // Batch: confetti + sparks (rotated rects)
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    if (p.shape !== 'confetti' && p.shape !== 'spark') continue;
+    const alpha = Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rotation);
+    if (p.shape === 'confetti') {
       ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
-      ctx.restore();
-    } else if (p.shape === 'spark') {
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rotation);
+    } else {
       ctx.fillRect(-p.size / 2, -1, p.size, 2);
       ctx.fillRect(-1, -p.size / 2, 2, p.size);
-      ctx.restore();
-    } else {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
-      ctx.fill();
     }
+    ctx.restore();
   }
+
   ctx.globalAlpha = 1;
 }

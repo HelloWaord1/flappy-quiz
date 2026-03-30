@@ -16,12 +16,14 @@ let cachedWidth = 0;
 let cachedHeight = 0;
 let cachedGroundHeight = 0;
 
-// Bird sprite caches (offscreen canvases for each wing frame)
+// Bird sprite caches (offscreen canvases for each wing frame & variant)
 const birdSprites = {
   normal: [null, null, null],   // 3 wing frames
   hurt: [null, null, null],
+  phase2: [null, null, null],
   phase3: [null, null, null],
 };
+let birdSpritesBuilt = false;
 
 // Coin offscreen (avoids radial gradient per frame)
 let coinCanvas = null;
@@ -108,6 +110,12 @@ export function ensureCaches(W, H, groundHeight) {
 
   // === Coin cache ===
   cacheCoin();
+
+  // === Bird sprite cache ===
+  if (!birdSpritesBuilt) {
+    cacheBirdSprites();
+    birdSpritesBuilt = true;
+  }
 }
 
 function cachePipeStrip(type) {
@@ -208,6 +216,190 @@ function cacheCoin() {
   ctxLow.textAlign = 'center';
   ctxLow.textBaseline = 'middle';
   ctxLow.fillText('$', cx, cy + 0.5);
+}
+
+// ============================================================
+// BIRD SPRITE CACHE — pre-render all variants × wing frames
+// ============================================================
+const BIRD_SIZE = 28;
+const WING_FRAMES = [
+  { angle: -0.35, yOff: -4 },
+  { angle: -0.1, yOff: 0 },
+  { angle: 0.2, yOff: 4 },
+];
+
+const BIRD_CONFIGS = {
+  normal: {
+    bodyGrad: [['#FFF176', 0], ['#F7DC6F', 0.7], ['#E6C349', 1]],
+    bodyStroke: '#F39C12',
+    wingGrad: [['#F0A830', 0], ['#F39C12', 1]],
+    wingStroke: '#D68910',
+    glasses: false, tie: false,
+  },
+  hurt: {
+    bodyGrad: [['#FF9999', 0], ['#FF4444', 1]],
+    bodyStroke: '#F39C12',
+    wingGrad: [['#F0A830', 0], ['#F39C12', 1]],
+    wingStroke: '#D68910',
+    glasses: false, tie: false,
+  },
+  phase2: {
+    bodyGrad: [['#FFF176', 0], ['#F7DC6F', 0.7], ['#E6C349', 1]],
+    bodyStroke: '#F39C12',
+    wingGrad: [['#F0A830', 0], ['#F39C12', 1]],
+    wingStroke: '#D68910',
+    glasses: true, tie: false,
+  },
+  phase3: {
+    bodyGrad: [['#B3E5FC', 0], ['#4FC3F7', 0.7], ['#0288D1', 1]],
+    bodyStroke: '#0288D1',
+    wingGrad: [['#29B6F6', 0], ['#0288D1', 1]],
+    wingStroke: '#0277BD',
+    glasses: false, tie: true,
+  },
+};
+
+function cacheBirdSprites() {
+  const pad = 10; // extra space for shadow, beak, tie
+  const spriteW = BIRD_SIZE + 40; // enough for beak extending right
+  const spriteH = BIRD_SIZE + 30; // enough for tie below
+
+  for (const variant of Object.keys(BIRD_CONFIGS)) {
+    const cfg = BIRD_CONFIGS[variant];
+    for (let wi = 0; wi < 3; wi++) {
+      const c = createOffscreen(spriteW, spriteH);
+      const ctx = c.getContext('2d');
+      const cx = spriteW / 2 - 4; // bird center, shifted left for beak space
+      const cy = spriteH / 2 - 2;
+      const wing = WING_FRAMES[wi];
+
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.beginPath();
+      ctx.ellipse(cx + 3, cy + 3, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Body gradient
+      const bodyGrad = ctx.createRadialGradient(cx - 3, cy - 3, 2, cx, cy, BIRD_SIZE / 2);
+      for (const [color, stop] of cfg.bodyGrad) bodyGrad.addColorStop(stop, color);
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, BIRD_SIZE / 2, BIRD_SIZE / 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = cfg.bodyStroke;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Belly highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(cx - 2, cy - 4, BIRD_SIZE / 3.5, BIRD_SIZE / 4, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wing
+      ctx.save();
+      ctx.translate(cx - 4, cy + 2);
+      ctx.rotate(wing.angle);
+      const wingGrad = ctx.createLinearGradient(0, wing.yOff - 6, 0, wing.yOff + 6);
+      for (const [color, stop] of cfg.wingGrad) wingGrad.addColorStop(stop, color);
+      ctx.fillStyle = wingGrad;
+      ctx.beginPath();
+      ctx.ellipse(0, wing.yOff, 11, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = cfg.wingStroke;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+
+      // Eye
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(cx + 8, cy - 5, 7.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Pupil
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.arc(cx + 10, cy - 5, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(cx + 11.5, cy - 6.5, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Glasses (phase2)
+      if (cfg.glasses) {
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx + 8, cy - 5, 9, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx - 4, cy - 4, 5.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx + 1, cy - 5);
+        ctx.lineTo(cx - 4 + 5.5, cy - 4);
+        ctx.stroke();
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = '#4444FF';
+        ctx.beginPath();
+        ctx.arc(cx + 8, cy - 5, 8.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx - 4, cy - 4, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // Beak (two-tone)
+      ctx.fillStyle = '#E74C3C';
+      ctx.beginPath();
+      ctx.moveTo(cx + 14, cy - 1);
+      ctx.lineTo(cx + 25, cy + 3);
+      ctx.lineTo(cx + 14, cy + 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#C0392B';
+      ctx.beginPath();
+      ctx.moveTo(cx + 14, cy + 4);
+      ctx.lineTo(cx + 25, cy + 3);
+      ctx.lineTo(cx + 14, cy + 7);
+      ctx.closePath();
+      ctx.fill();
+
+      // Tie (phase3)
+      if (cfg.tie) {
+        ctx.fillStyle = '#D32F2F';
+        ctx.beginPath();
+        ctx.moveTo(cx + 12, cy + 8);
+        ctx.lineTo(cx + 16, cy + 8);
+        ctx.lineTo(cx + 14, cy + 12);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#B71C1C';
+        ctx.beginPath();
+        ctx.moveTo(cx + 13, cy + 12);
+        ctx.lineTo(cx + 15, cy + 12);
+        ctx.lineTo(cx + 16, cy + 20);
+        ctx.lineTo(cx + 14, cy + 18);
+        ctx.lineTo(cx + 12, cy + 20);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      birdSprites[variant][wi] = c;
+    }
+  }
+}
+
+export function getBirdSprite(variant, wingIndex) {
+  const sprites = birdSprites[variant];
+  if (!sprites) return null;
+  return sprites[wingIndex] || sprites[1];
 }
 
 export function getSkyCanvas(isPhase3) {
