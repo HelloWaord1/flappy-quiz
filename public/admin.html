@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flappy Quiz — Analytics</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f1117;--card:#1a1d27;--border:#2a2d3a;--text:#e4e4e7;--text-dim:#71717a;--accent:#3b82f6;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--orange:#f97316}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.5}
+.container{max-width:1200px;margin:0 auto;padding:16px}
+h1{font-size:24px;margin-bottom:4px}
+h2{font-size:18px;margin-bottom:12px;color:var(--text-dim)}
+h3{font-size:15px;margin-bottom:8px;color:var(--accent)}
+
+/* Auth */
+#auth-screen{display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:12px}
+#auth-screen input{padding:10px 16px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:16px;width:250px}
+#auth-screen button{padding:10px 24px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:16px;cursor:pointer}
+
+/* Nav */
+.nav{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
+.nav button{padding:6px 16px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);cursor:pointer;font-size:13px}
+.nav button.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* Cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
+.card .value{font-size:28px;font-weight:700;margin:4px 0}
+.card .label{font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px}
+.card .sub{font-size:12px;color:var(--text-dim);margin-top:2px}
+.green{color:var(--green)}.red{color:var(--red)}.yellow{color:var(--yellow)}.orange{color:var(--orange)}.blue{color:var(--accent)}
+
+/* Funnel */
+.funnel{margin-bottom:20px}
+.funnel-step{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.funnel-bar{height:28px;border-radius:6px;min-width:4px;transition:width .3s}
+.funnel-label{font-size:13px;white-space:nowrap;min-width:120px}
+.funnel-pct{font-size:13px;color:var(--text-dim);min-width:50px;text-align:right}
+
+/* Table */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;padding:8px 12px;border-bottom:2px solid var(--border);color:var(--text-dim);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:0.5px}
+.tbl td{padding:8px 12px;border-bottom:1px solid var(--border)}
+.tbl tr:hover{background:rgba(59,130,246,0.05)}
+.tbl tr{cursor:pointer}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge-green{background:rgba(34,197,94,0.15);color:var(--green)}
+.badge-red{background:rgba(239,68,68,0.15);color:var(--red)}
+.badge-yellow{background:rgba(234,179,8,0.15);color:var(--yellow)}
+.badge-blue{background:rgba(59,130,246,0.15);color:var(--accent)}
+
+/* Session detail */
+.session-detail{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-top:16px}
+.session-header{display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+.back-btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);cursor:pointer;font-size:13px}
+
+/* Timeline */
+.timeline{position:relative;padding-left:24px}
+.timeline::before{content:'';position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border)}
+.tl-event{position:relative;margin-bottom:8px;padding:6px 12px;background:rgba(255,255,255,0.02);border-radius:8px;font-size:13px}
+.tl-event::before{content:'';position:absolute;left:-20px;top:12px;width:10px;height:10px;border-radius:50%;border:2px solid var(--border);background:var(--bg)}
+.tl-event.correct::before{border-color:var(--green);background:var(--green)}
+.tl-event.wrong::before{border-color:var(--red);background:var(--red)}
+.tl-event.phase::before{border-color:var(--accent);background:var(--accent)}
+.tl-event.lead::before{border-color:var(--yellow);background:var(--yellow)}
+.tl-event .tl-time{color:var(--text-dim);font-size:11px;margin-right:8px}
+.tl-event .tl-type{font-weight:600;margin-right:6px}
+.tl-event .tl-data{color:var(--text-dim)}
+
+/* Pagination */
+.pagination{display:flex;gap:8px;justify-content:center;margin-top:16px}
+.pagination button{padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);cursor:pointer;font-size:13px}
+.pagination button:disabled{opacity:0.3;cursor:default}
+
+/* Drop-off */
+.drop-table{margin-bottom:20px}
+
+/* Loading */
+.loading{text-align:center;padding:40px;color:var(--text-dim)}
+
+/* Responsive */
+@media(max-width:640px){.cards{grid-template-columns:repeat(2,1fr)}.container{padding:10px}}
+</style>
+</head>
+<body>
+
+<div id="auth-screen">
+  <h1>Flappy Quiz Analytics</h1>
+  <input type="password" id="auth-input" placeholder="Admin password" autofocus>
+  <button onclick="authenticate()">Enter</button>
+</div>
+
+<div id="app" style="display:none">
+  <div class="container">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap">
+      <div><h1>Flappy Quiz Analytics</h1><h2 id="date-range"></h2></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="date" id="date-from" style="padding:6px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:13px">
+        <span style="color:var(--text-dim)">—</span>
+        <input type="date" id="date-to" style="padding:6px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:13px">
+        <button onclick="applyDateFilter()" style="padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--accent);color:#fff;cursor:pointer;font-size:13px">Filter</button>
+      </div>
+    </div>
+
+    <div class="nav">
+      <button class="active" onclick="showTab('dashboard',this)">Dashboard</button>
+      <button onclick="showTab('sessions',this)">Sessions</button>
+      <button onclick="showTab('answers',this)">Answers</button>
+    </div>
+
+    <div id="tab-dashboard"></div>
+    <div id="tab-sessions" style="display:none"></div>
+    <div id="tab-answers" style="display:none"></div>
+    <div id="session-detail" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+let API_KEY = '';
+let currentTab = 'dashboard';
+let sessionsPage = 0;
+
+function authenticate() {
+  API_KEY = document.getElementById('auth-input').value;
+  apiFetch('/api/admin/stats').then(data => {
+    if (data.error) { alert('Wrong password'); return; }
+    document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    localStorage.setItem('fq_key', API_KEY);
+    loadDashboard();
+    loadSessions();
+    loadAnswers();
+  }).catch(() => alert('Connection error'));
+}
+
+// Auto-login
+const saved = localStorage.getItem('fq_key');
+if (saved) { API_KEY = saved; authenticate = () => {}; document.getElementById('auth-input').value = saved; document.querySelector('#auth-screen button').click(); }
+
+document.getElementById('auth-input').addEventListener('keydown', e => { if (e.key === 'Enter') authenticate(); });
+
+function apiFetch(url) {
+  const sep = url.includes('?') ? '&' : '?';
+  return fetch(url + sep + 'key=' + encodeURIComponent(API_KEY)).then(r => r.json());
+}
+
+function getDateParams() {
+  const from = document.getElementById('date-from').value;
+  const to = document.getElementById('date-to').value;
+  let params = '';
+  if (from) params += '&from=' + from;
+  if (to) params += '&to=' + to + 'T23:59:59';
+  return params;
+}
+
+function applyDateFilter() { loadDashboard(); loadSessions(); loadAnswers(); }
+
+function showTab(tab, btn) {
+  currentTab = tab;
+  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  ['dashboard','sessions','answers'].forEach(t => {
+    document.getElementById('tab-' + t).style.display = t === tab ? 'block' : 'none';
+  });
+  document.getElementById('session-detail').style.display = 'none';
+}
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+async function loadDashboard() {
+  const el = document.getElementById('tab-dashboard');
+  el.innerHTML = '<div class="loading">Loading...</div>';
+  const data = await apiFetch('/api/admin/stats?' + getDateParams());
+  const f = data.funnel;
+
+  const convRate = f.total_sessions > 0 ? ((f.leads / f.total_sessions) * 100).toFixed(1) : '0';
+  const engageRate = f.total_sessions > 0 ? ((f.played / f.total_sessions) * 100).toFixed(1) : '0';
+
+  el.innerHTML = `
+    <div class="cards">
+      <div class="card"><div class="label">Total Sessions</div><div class="value">${f.total_sessions}</div></div>
+      <div class="card"><div class="label">Played</div><div class="value green">${f.played}</div><div class="sub">${engageRate}% of visits</div></div>
+      <div class="card"><div class="label">Leads</div><div class="value yellow">${f.leads}</div><div class="sub">${convRate}% conversion</div></div>
+      <div class="card"><div class="label">Avg Duration</div><div class="value blue">${f.avg_duration || 0}s</div></div>
+      <div class="card"><div class="label">Avg Score</div><div class="value orange">${Math.round(f.avg_score || 0)}</div></div>
+      <div class="card"><div class="label">Avg Correct</div><div class="value green">${(f.avg_correct || 0).toFixed(1)}</div></div>
+    </div>
+
+    <h3>Conversion Funnel</h3>
+    <div class="funnel">${renderFunnel(f)}</div>
+
+    <h3>Drop-off Points</h3>
+    <div class="drop-table">${renderDropOff(data.dropOff)}</div>
+
+    <h3>Devices</h3>
+    <div class="drop-table">${renderDevices(data.devices)}</div>
+
+    <h3>Hourly Traffic (last 7d)</h3>
+    <div style="overflow-x:auto">${renderHourly(data.hourly)}</div>
+  `;
+}
+
+function renderFunnel(f) {
+  const steps = [
+    { label: 'Visited', count: f.total_sessions, color: 'var(--accent)' },
+    { label: 'Engaged (>3s)', count: f.engaged, color: 'var(--accent)' },
+    { label: 'Played', count: f.played, color: 'var(--green)' },
+    { label: 'Phase 2', count: f.reached_phase2, color: 'var(--orange)' },
+    { label: 'Phase 3', count: f.reached_phase3, color: 'var(--yellow)' },
+    { label: 'Lead Submitted', count: f.leads, color: 'var(--red)' },
+  ];
+  const max = Math.max(...steps.map(s => s.count), 1);
+  return steps.map(s => {
+    const pct = ((s.count / max) * 100).toFixed(0);
+    const rate = f.total_sessions > 0 ? ((s.count / f.total_sessions) * 100).toFixed(1) : '0';
+    return `<div class="funnel-step">
+      <div class="funnel-label">${s.label}</div>
+      <div class="funnel-bar" style="width:${Math.max(pct, 2)}%;background:${s.color}"></div>
+      <div><strong>${s.count}</strong></div>
+      <div class="funnel-pct">${rate}%</div>
+    </div>`;
+  }).join('');
+}
+
+function renderDropOff(drops) {
+  if (!drops || drops.length === 0) return '<div style="color:var(--text-dim);font-size:13px">No data yet</div>';
+  return `<table class="tbl"><tr><th>Phase</th><th>State</th><th>Count</th></tr>
+    ${drops.map(d => `<tr><td>Phase ${d.drop_phase}</td><td>${d.drop_state || '—'}</td><td>${d.count}</td></tr>`).join('')}
+  </table>`;
+}
+
+function renderDevices(devices) {
+  if (!devices || devices.length === 0) return '<div style="color:var(--text-dim);font-size:13px">No data yet</div>';
+  return `<table class="tbl"><tr><th>Device</th><th>Sessions</th><th>Avg Duration</th><th>Leads</th></tr>
+    ${devices.map(d => `<tr><td>${d.device_type || 'unknown'}</td><td>${d.count}</td><td>${d.avg_duration}s</td><td>${d.leads}</td></tr>`).join('')}
+  </table>`;
+}
+
+function renderHourly(hourly) {
+  if (!hourly || hourly.length === 0) return '<div style="color:var(--text-dim);font-size:13px">No data yet</div>';
+  const max = Math.max(...hourly.map(h => h.sessions), 1);
+  return `<div style="display:flex;align-items:end;gap:2px;height:120px;padding:8px 0">
+    ${hourly.slice(0, 48).reverse().map(h => {
+      const pct = (h.sessions / max * 100).toFixed(0);
+      return `<div style="flex:1;min-width:6px;background:var(--accent);height:${Math.max(pct, 2)}%;border-radius:2px 2px 0 0;opacity:${h.leads > 0 ? 1 : 0.4}" title="${h.hour}: ${h.sessions} sessions, ${h.leads} leads"></div>`;
+    }).join('')}
+  </div>`;
+}
+
+// ============================================================
+// SESSIONS
+// ============================================================
+async function loadSessions() {
+  const el = document.getElementById('tab-sessions');
+  el.innerHTML = '<div class="loading">Loading...</div>';
+  const limit = 50;
+  const data = await apiFetch('/api/admin/sessions?limit=' + limit + '&offset=' + (sessionsPage * limit) + getDateParams());
+
+  el.innerHTML = `
+    <div style="margin-bottom:12px;color:var(--text-dim);font-size:13px">${data.total} sessions total</div>
+    <table class="tbl">
+      <tr><th>Time</th><th>Device</th><th>Duration</th><th>Phase</th><th>Score</th><th>Answers</th><th>Lead</th></tr>
+      ${data.sessions.map(s => `
+        <tr onclick="showSession('${s.id}')">
+          <td>${fmtDate(s.started_at)}</td>
+          <td>${s.device_type || '?'}</td>
+          <td>${Math.round(s.duration_sec)}s</td>
+          <td><span class="badge badge-blue">P${s.max_phase}</span></td>
+          <td>${s.max_score}</td>
+          <td><span class="green">${s.total_correct}</span>/<span class="red">${s.total_wrong}</span></td>
+          <td>${s.lead_submitted ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>'}</td>
+        </tr>
+      `).join('')}
+    </table>
+    <div class="pagination">
+      <button ${sessionsPage === 0 ? 'disabled' : ''} onclick="sessionsPage--;loadSessions()">← Prev</button>
+      <span style="padding:6px;color:var(--text-dim);font-size:13px">Page ${sessionsPage + 1} / ${Math.ceil(data.total / limit) || 1}</span>
+      <button ${(sessionsPage + 1) * limit >= data.total ? 'disabled' : ''} onclick="sessionsPage++;loadSessions()">Next →</button>
+    </div>
+  `;
+}
+
+// ============================================================
+// SESSION DETAIL
+// ============================================================
+async function showSession(id) {
+  document.getElementById('tab-sessions').style.display = 'none';
+  const el = document.getElementById('session-detail');
+  el.style.display = 'block';
+  el.innerHTML = '<div class="loading">Loading session...</div>';
+
+  const data = await apiFetch('/api/admin/sessions/' + id);
+  const s = data.session;
+  const events = data.events;
+
+  el.innerHTML = `
+    <button class="back-btn" onclick="backToSessions()">← Back to Sessions</button>
+    <div class="session-header">
+      <div>
+        <h3>Session ${s.id.substring(0, 8)}...</h3>
+        <div style="font-size:13px;color:var(--text-dim)">${fmtDate(s.started_at)} • ${s.device_type || 'unknown'} • ${s.screen_width}x${s.screen_height}</div>
+        <div style="font-size:13px;color:var(--text-dim)">UA: ${(s.user_agent || '').substring(0, 80)}...</div>
+        ${s.referrer ? `<div style="font-size:13px;color:var(--text-dim)">Ref: ${s.referrer}</div>` : ''}
+        ${s.utm_source ? `<div style="font-size:13px;color:var(--text-dim)">UTM: ${s.utm_source} / ${s.utm_medium || ''} / ${s.utm_campaign || ''}</div>` : ''}
+      </div>
+      <div class="cards" style="min-width:300px">
+        <div class="card"><div class="label">Duration</div><div class="value blue">${Math.round(s.duration_sec)}s</div></div>
+        <div class="card"><div class="label">Max Phase</div><div class="value orange">P${s.max_phase}</div></div>
+        <div class="card"><div class="label">Score</div><div class="value">${s.max_score}</div></div>
+        <div class="card"><div class="label">Lead</div><div class="value ${s.lead_submitted ? 'green' : 'red'}">${s.lead_submitted ? 'Yes' : 'No'}</div></div>
+      </div>
+    </div>
+    <h3>Event Timeline (${events.length} events)</h3>
+    <div class="timeline">${renderTimeline(events)}</div>
+  `;
+}
+
+function renderTimeline(events) {
+  return events.map(e => {
+    const d = e.data ? JSON.parse(e.data) : {};
+    let cls = '';
+    if (e.event_type === 'answer' && d.correct) cls = 'correct';
+    if (e.event_type === 'answer' && !d.correct) cls = 'wrong';
+    if (e.event_type === 'gate_failed' || e.event_type === 'game_over') cls = 'wrong';
+    if (e.event_type === 'gate_passed') cls = 'correct';
+    if (e.event_type.startsWith('phase_')) cls = 'phase';
+    if (e.event_type.startsWith('lead_')) cls = 'lead';
+
+    const desc = fmtEvent(e.event_type, d);
+
+    return `<div class="tl-event ${cls}">
+      <span class="tl-time">${e.sec_since_start.toFixed(1)}s</span>
+      <span class="tl-type">${e.event_type}</span>
+      <span class="tl-data">${desc}</span>
+    </div>`;
+  }).join('');
+}
+
+function fmtEvent(type, d) {
+  switch (type) {
+    case 'session_start': return '';
+    case 'tap': return '';
+    case 'answer': return `${d.question || ''} → <strong>${d.answer}</strong> ${d.correct ? '✅' : '❌'} (${d.time_sec || 0}s)`;
+    case 'gate_passed': return d.question || '';
+    case 'gate_failed': return d.question || '';
+    case 'phase_change': return `Score: ${d.score}, Balance: $${d.balance || 0}`;
+    case 'life_change': return `Lives: ${d.lives} (${d.reason})`;
+    case 'coin': return `+${d.points} → ${d.total}`;
+    case 'score': return `${d.score}`;
+    case 'balance': return `$${d.balance}`;
+    case 'lead_open': return `Balance: $${d.balance}`;
+    case 'lead_submitted': return `${d.name || ''}`;
+    case 'game_over': return `Score: ${d.score}, Lives: ${d.lives}`;
+    case 'tab_hidden': return 'User switched tab';
+    case 'tab_visible': return 'User returned';
+    case 'session_end': return `${d.state || ''} at ${d.duration_sec?.toFixed(1) || 0}s`;
+    case 'menu_start': return 'Started game';
+    default: return JSON.stringify(d).substring(0, 100);
+  }
+}
+
+function backToSessions() {
+  document.getElementById('session-detail').style.display = 'none';
+  document.getElementById('tab-sessions').style.display = 'block';
+}
+
+// ============================================================
+// ANSWERS
+// ============================================================
+async function loadAnswers() {
+  const el = document.getElementById('tab-answers');
+  el.innerHTML = '<div class="loading">Loading...</div>';
+  const data = await apiFetch('/api/admin/answers?' + getDateParams());
+
+  if (!data || data.length === 0) { el.innerHTML = '<div style="color:var(--text-dim)">No answer data yet</div>'; return; }
+
+  // Group by question
+  const byQ = {};
+  for (const row of data) {
+    if (!byQ[row.question]) byQ[row.question] = [];
+    byQ[row.question].push(row);
+  }
+
+  let html = '';
+  for (const [q, answers] of Object.entries(byQ)) {
+    const total = answers.reduce((s, a) => s + a.count, 0);
+    html += `<div class="card" style="margin-bottom:12px">
+      <h3 style="margin-bottom:8px">${q}</h3>
+      <div style="font-size:13px;color:var(--text-dim);margin-bottom:6px">${total} total answers</div>
+      ${answers.map(a => {
+        const pct = ((a.count / total) * 100).toFixed(0);
+        const color = a.correct === 1 || a.correct === true ? 'var(--green)' : 'var(--red)';
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:13px">
+          <div style="min-width:120px">${a.answer} ${a.correct ? '✅' : '❌'}</div>
+          <div style="flex:1;background:var(--border);border-radius:4px;height:16px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${color};border-radius:4px"></div>
+          </div>
+          <div style="min-width:60px;text-align:right">${a.count} (${pct}%)</div>
+          <div style="min-width:50px;text-align:right;color:var(--text-dim)">${a.avg_time_sec || 0}s</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+// ============================================================
+// UTILS
+// ============================================================
+function fmtDate(d) {
+  if (!d) return '—';
+  const date = new Date(d + 'Z');
+  return date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+</script>
+</body>
+</html>

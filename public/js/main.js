@@ -12,6 +12,7 @@ import { shareWithImage } from './shareCard.js';
 import { createBalanceAnimState, updateBalanceAnim, drawAnimatedBalance } from './balanceAnim.js';
 import { updatePerfmon, drawFpsCounter, getQualityLevel, getShouldSkipRender } from './perfmon.js';
 import { invalidateCache, getCoinCanvas } from './gradientCache.js';
+import { track, trackTap, trackPhaseChange, trackQuestionShown, trackAnswer, trackGateResult, trackLifeChange, trackCoin, trackScore, trackBalance, trackLeadForm, trackGameOver, trackMenu } from './analytics.js';
 
 // ============================================================
 // CONFIG
@@ -380,6 +381,7 @@ function triggerDamage() {
   state.invincibleTimer = 50;
   emitWrongParticles(state.bird.x, state.bird.y);
   addFloatingText(state.bird.x + 30, state.bird.y - 20, '-\u2764\uFE0F', '#F44336', 22);
+  trackLifeChange(state.scene === 'phase2' ? 2 : 1, state.lives, 'collision');
   playWrong();
   if (state.lives >= 0 && state.lives < MAX_LIVES) {
     state.heartPulse[state.lives] = 1;
@@ -437,6 +439,9 @@ function handleGatePass(gate) {
       playCombo();
     }
 
+    trackAnswer(1, question.q, chose, true, 0);
+    trackGateResult(1, true, question.q);
+    trackScore(1, state.score);
     playCorrect();
   } else {
     state.lives--;
@@ -450,6 +455,9 @@ function handleGatePass(gate) {
     state.invincibleTimer = 40;
     emitWrongParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, '-\u2764\uFE0F', '#F44336', 22);
+    trackAnswer(1, question.q, chose, false, 0);
+    trackGateResult(1, false, question.q);
+    trackLifeChange(1, state.lives, 'wrong_answer');
     playWrong();
     if (state.lives >= 0 && state.lives < MAX_LIVES) {
       state.heartPulse[state.lives] = 1;
@@ -475,6 +483,7 @@ function handleGatePass(gate) {
 // PHASE 2: FINANCIAL QUIZ
 // ============================================================
 function startPhase2() {
+  trackPhaseChange(2, state.score, 0);
   state.scene = 'phase2';
   state.gates = [];
   state.hearts = [];
@@ -530,6 +539,9 @@ function handlePhase2GatePass(gate) {
     state.flashColor = 'rgb(76,175,80)';
     emitCorrectParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, '+15', '#4CAF50', 24);
+    trackAnswer(2, question.q, chose, true, 0);
+    trackGateResult(2, true, question.q);
+    trackScore(2, state.score);
     playCorrect();
   } else {
     state.lives--;
@@ -543,6 +555,9 @@ function handlePhase2GatePass(gate) {
     state.invincibleTimer = 40;
     emitWrongParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, '-\u2764\uFE0F', '#F44336', 22);
+    trackAnswer(2, question.q, chose, false, 0);
+    trackGateResult(2, false, question.q);
+    trackLifeChange(2, state.lives, 'wrong_answer');
     playWrong();
     if (state.lives <= 0) { startDying(); return; }
   }
@@ -580,6 +595,7 @@ function drawPhase2QuestionBanner() {
 // PHASE 3: FLAPPY TRADING
 // ============================================================
 function startPhase3() {
+  trackPhaseChange(3, state.score, 1000);
   state.scene = 'phase3';
   state.balance = 1000;
   state.p3TradeCount = 0;
@@ -644,6 +660,8 @@ function handleTradePass(gate) {
     state.flashColor = 'rgb(76,175,80)';
     emitCorrectParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, `+$${gain}`, '#4CAF50', 22);
+    trackAnswer(3, gate.scenario.hint, chose, true, 0);
+    trackBalance(3, state.balance);
     playCorrect();
   } else {
     const loss = 30 + Math.floor(Math.random() * 70);
@@ -652,6 +670,8 @@ function handleTradePass(gate) {
     state.flashColor = 'rgb(244,67,54)';
     emitWrongParticles(state.bird.x, state.bird.y);
     addFloatingText(state.bird.x + 30, state.bird.y - 20, `-$${loss}`, '#F44336', 22);
+    trackAnswer(3, gate.scenario.hint, chose, false, 0);
+    trackBalance(3, state.balance);
     playWrong();
     // No life loss in phase 3 — infinite mode
   }
@@ -671,6 +691,7 @@ function handleTradePass(gate) {
 // LEAD FORM / GAME OVER / SHARE
 // ============================================================
 function showLeadForm() {
+  trackLeadForm(3, 'open', { balance: state.balance });
   document.getElementById('form-balance').textContent = `Seu saldo: $${state.balance.toLocaleString()} \uD83E\uDD11`;
   document.getElementById('lead-form').classList.remove('hidden');
 }
@@ -681,10 +702,13 @@ document.getElementById('capture-form')?.addEventListener('submit', async (e) =>
   const data = { name: fd.get('name'), phone: fd.get('phone'), email: fd.get('email'), score: state.score, balance: state.balance, phase: 3, answers: state.qualifyAnswers };
   try { await fetch('/api/leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); }
   catch (err) { console.error('Lead submission failed:', err); }
+  trackLeadForm(3, 'submitted', { name: data.name, score: data.score, balance: data.balance });
   e.target.innerHTML = '<p style="font-size:24px;padding:20px;">\u2705 Enviado!<br><br>Entraremos em contato em breve!</p>';
 });
 
 function startDying() {
+  const phase = state.scene === 'phase2' ? 2 : 1;
+  trackGameOver(phase, state.score, state.lives);
   state.scene = 'dying';
   state.dyingTimer = 90;
   playGameOver();
@@ -743,7 +767,7 @@ document.getElementById('btn-share')?.addEventListener('click', () => {
 // INPUT (passive touch events)
 // ============================================================
 function handleTap(tx, ty) {
-  if (state.scene === 'menu') { resetPhase1(); return; }
+  if (state.scene === 'menu') { trackMenu('start'); resetPhase1(); return; }
   if (state.scene === 'countdown') return;
   if (state.scene === 'dying' || state.scene === 'transition') return;
   if (state.scene === 'phase1' || state.scene === 'phase2' || state.scene === 'phase3') {
@@ -753,6 +777,7 @@ function handleTap(tx, ty) {
     state.bird.vel = JUMP_FORCE;
     state.bird.wingIndex = 0;
     state.bird.wingTimer = 0;
+    trackTap(state.scene === 'phase1' ? 1 : state.scene === 'phase2' ? 2 : 3);
     playFlap();
   }
 }
@@ -870,6 +895,7 @@ function update(dt) {
           emitHeartParticles(h.x, h.y);
           addFloatingText(h.x, h.y - 20, '+\u2764\uFE0F', '#FF69B4', 24);
           state.heartPulse[state.lives - 1] = 1;
+          trackLifeChange(state.scene === 'phase2' ? 2 : 1, state.lives, 'heart_pickup');
           playHeartPickup();
         }
       }
@@ -894,6 +920,7 @@ function update(dt) {
         state.score += COIN_POINTS;
         emitCoinParticles(c.x, c.y);
         addFloatingText(c.x, c.y - 15, `+${COIN_POINTS}`, '#FFD700', 18);
+        trackCoin(state.scene === 'phase2' ? 2 : 1, COIN_POINTS, state.score);
         playCoin();
       }
     }
